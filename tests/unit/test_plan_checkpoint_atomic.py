@@ -15,13 +15,19 @@ Verifies:
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
 import os
 import tempfile
+from pathlib import Path
+from typing import Any
 
 import pytest
 
-from lazybridge import Agent
+from lazybridge import Agent, Envelope
+from lazybridge._process_owner import current_owner_fields
 from lazybridge.engines.plan import ConcurrentPlanRunError, Plan, Step
+from lazybridge.envelope import UncertainOutcomeError
+from lazybridge.ext.delegation import JobRegistry
 from lazybridge.store import Store
 from lazybridge.testing import MockAgent
 
@@ -165,6 +171,7 @@ async def test_resume_adopts_in_flight_checkpoint_and_rewrites_run_uid() -> None
         "completed_steps": ["a"],
         "status": "running",
         "run_uid": "old-uid",
+        **current_owner_fields(),
     }
     store.write("shared", crashed)
 
@@ -181,6 +188,114 @@ async def test_resume_adopts_in_flight_checkpoint_and_rewrites_run_uid() -> None
     assert cp["status"] == "done"
     # run_uid has been replaced with the adopter's (not the crashed one).
     assert cp["run_uid"] != "old-uid"
+
+
+async def test_resume_refuses_unknown_legacy_owner() -> None:
+    store = Store()
+    active = {"status": "running", "next_step": "a", "run_uid": "unverified"}
+    store.write("shared", active)
+
+    with pytest.raises(ConcurrentPlanRunError, match="unverified active owner"):
+        await _make_plan(store, resume=True).run("x")
+
+    assert store.read("shared") == active
+
+
+def _hold_recovery_records(db: str, ready: Any, stop: Any) -> None:
+    owner = current_owner_fields()
+    with Store(db=db) as store:
+        store.write("shared", {"status": "running", "run_uid": "foreign", "next_step": "a", **owner})
+        JobRegistry(store).write("pending", "work", tool_name="delegate", status="running", **owner)
+        ready.set()
+        stop.wait(timeout=30)
+
+
+async def test_recovery_distinguishes_live_and_finished_processes(tmp_path: Path) -> None:
+    db = str(tmp_path / "shared.sqlite")
+    ctx = multiprocessing.get_context("spawn")
+    ready = ctx.Event()
+    stop = ctx.Event()
+    process = ctx.Process(target=_hold_recovery_records, args=(db, ready, stop))
+    process.start()
+    try:
+        assert await asyncio.to_thread(ready.wait, 10)
+        with Store(db=db) as store:
+            registry = JobRegistry(store)
+            assert registry.reclaim_interrupted() == []
+            with pytest.raises(ConcurrentPlanRunError, match="live run"):
+                await _make_plan(store, resume=True).run("task")
+
+            stop.set()
+            await asyncio.to_thread(process.join, 10)
+            assert process.exitcode == 0
+            assert registry.reclaim_interrupted() == ["pending"]
+            result = await _make_plan(store, resume=True).run("task")
+            assert result.ok
+            assert store.read("shared")["status"] == "done"
+    finally:
+        stop.set()
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=5)
+        process.close()
+
+
+@pytest.mark.parametrize("status", [None, "failed", "paused"])
+async def test_resume_refuses_second_run_before_it_executes(status: str | None) -> None:
+    store = Store()
+    if status is not None:
+        store.write("shared", {"status": status, "next_step": "worker", "run_uid": "prior"})
+
+    entered = asyncio.Event()
+    finish = asyncio.Event()
+    executions: list[str] = []
+
+    async def worker(task: str) -> str:
+        executions.append(task)
+        if len(executions) == 1:
+            entered.set()
+            await finish.wait()
+        return "done"
+
+    def plan() -> Agent:
+        return Agent(engine=Plan(Step(worker), store=store, checkpoint_key="shared", resume=True), name="work")
+
+    first = asyncio.create_task(plan().run("task"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        with pytest.raises(ConcurrentPlanRunError, match="live run"):
+            await plan().run("task")
+    finally:
+        finish.set()
+        await first
+
+    assert executions == ["task"]
+    assert store.read("shared")["status"] == "done"
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+async def test_uncertain_checkpoint_blocks_replay(parallel: bool) -> None:
+    store = Store()
+    uncertain = Envelope.error_envelope(UncertainOutcomeError("Inspect the previous attempt"))
+    worker = MockAgent(uncertain, name="worker")
+    steps = (
+        (
+            Step(MockAgent(Envelope.error_envelope(RuntimeError("other branch failed")), name="other"), parallel=True),
+            Step(worker, parallel=True),
+        )
+        if parallel
+        else (Step(worker),)
+    )
+
+    first = Agent(engine=Plan(*steps, store=store, checkpoint_key="shared"), name="work")
+    result = await first.run("task")
+
+    assert result.error is not None and result.error.outcome_uncertain
+    assert store.read("shared")["status"] == "uncertain"
+    second = Agent(engine=Plan(*steps, store=store, checkpoint_key="shared", resume=True), name="work")
+    with pytest.raises(ConcurrentPlanRunError, match="requires reconciliation"):
+        await second.run("task")
+    assert len(worker.calls) == 1
 
 
 @pytest.mark.asyncio

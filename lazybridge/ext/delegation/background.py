@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import inspect
 import logging
 import re
@@ -16,11 +17,13 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from lazybridge import Tool
 from lazybridge._display import elide
+from lazybridge._process_owner import current_owner_fields
 from lazybridge.ext.delegation.admission import (
     _AdmissionLease,
     refund_admission,
@@ -349,6 +352,7 @@ async def _run_delegate_job(
     from lazybridge import Agent
 
     created_at = created_at or datetime.now(UTC).isoformat()
+    owner_fields = current_owner_fields()
 
     setup_phase = "engine_factory"
     try:
@@ -368,6 +372,7 @@ async def _run_delegate_job(
             execution_started=False,
             created_at=created_at,
             finished_at=datetime.now(UTC).isoformat(),
+            **owner_fields,
         )
         _safe_notify(notify, f"{label} job {job_id[:8]} FAILED before it started: {objective[:100]}\n\n{exc}")
         return
@@ -391,6 +396,7 @@ async def _run_delegate_job(
         effort=effort,
         created_at=created_at,
         cost_unknown=True,
+        **owner_fields,
     )
     if context is not None:
         context.started = True
@@ -416,6 +422,7 @@ async def _run_delegate_job(
             # No result envelope exists to read a real cost from -- stays
             # genuinely unknown rather than assumed zero.
             cost_unknown=True,
+            **owner_fields,
         )
         _safe_notify(notify, f"{label} job {job_id[:8]} FAILED: {objective[:100]}\n\n{exc}")
         return
@@ -441,6 +448,7 @@ async def _run_delegate_job(
             finished_at=finished_at,
             cost_usd=cost_usd,
             cost_unknown=False,
+            **owner_fields,
         )
         preview = elide(text)
         _safe_notify(notify, f"{label} job {job_id[:8]} done: {objective[:100]}\n\n{preview}")
@@ -476,6 +484,7 @@ async def _run_delegate_job(
             finished_at=finished_at,
             cost_usd=cost_usd if cost_known else None,
             cost_unknown=not cost_known,
+            **owner_fields,
         )
         _safe_notify(notify, f"{label} job {job_id[:8]} FAILED: {objective[:100]}\n\n{message}")
 
@@ -526,6 +535,8 @@ def make_background_delegate(
     extra_params: Mapping[str, ExtraParam] | None = None,
     guard: Callable[[str, dict[str, Any]], Any] | None = None,
     job_runner: JobRunner | None = None,
+    _prepare_job: Callable[[str, dict[str, Any]], tuple[Callable[[], Any], Callable[[], Awaitable[bool]]]]
+    | None = None,
 ) -> Tool:
     """Build a fire-and-forget delegate with durable status reporting.
 
@@ -608,7 +619,7 @@ def make_background_delegate(
 
     def _write_queued(job_id: str, objective: str, **kwargs: Any) -> None:
         if selected_runner is None:
-            registry.write(job_id, objective, **kwargs)
+            registry.write(job_id, objective, **kwargs, **current_owner_fields())
         else:
             kwargs.pop("tool_name", None)
             registry.update(job_id, kwargs, expected_started=False)
@@ -618,14 +629,15 @@ def make_background_delegate(
         objective: str,
         created_at: str,
         *,
-        engine_factory: Callable[[], Any] = engine_factory,
+        engine_factory: Callable[[], Any],
+        confirm: Callable[[], Awaitable[bool]] | None,
         admission: Any = None,
     ) -> None:
         handed_to_runner = False
         try:
-            if pre_confirm is not None:
+            if confirm is not None:
                 try:
-                    approved = await pre_confirm(objective)
+                    approved = await confirm()
                 except Exception as exc:
                     # A raised pre_confirm (approval channel disconnected,
                     # timed out, ...) must still leave the job at a TERMINAL
@@ -778,12 +790,22 @@ def make_background_delegate(
                 else:
                     await refund_admission(admission)
 
-    async def _start_and_describe(objective: str, *, engine_factory_for_job: Callable[[], Any]) -> str:
+    async def _start_and_describe(objective: str, call_kwargs: dict[str, Any]) -> str:
+        engine_factory_for_job: Callable[[], Any]
+        confirm: Callable[[], Awaitable[bool]] | None
+        if _prepare_job is None:
+            engine_factory_for_job = partial(engine_factory, **call_kwargs)
+            confirm = partial(pre_confirm, objective) if pre_confirm is not None else None
+        else:
+            try:
+                engine_factory_for_job, confirm = _prepare_job(objective, call_kwargs)
+            except (OSError, TypeError, ValueError) as exc:
+                return f"REJECTED: could not prepare {label} delegation: {exc}"
         job_id = str(uuid.uuid4())
         created_at = datetime.now(UTC).isoformat()
-        initial_status = "awaiting_approval" if pre_confirm is not None else "running"
+        initial_status = "awaiting_approval" if confirm is not None else "running"
         admission: Any = None
-        if pre_confirm is None and admission_gate is not None:
+        if confirm is None and admission_gate is not None:
             try:
                 decision = await admission_gate()
             except Exception as exc:
@@ -839,10 +861,24 @@ def make_background_delegate(
         async def run() -> None:
             nonlocal entered
             entered = True
-            await _run_job(job_id, objective, created_at, engine_factory=engine_factory_for_job, admission=admission)
+            await _run_job(
+                job_id,
+                objective,
+                created_at,
+                engine_factory=engine_factory_for_job,
+                confirm=confirm,
+                admission=admission,
+            )
 
         try:
-            registry.write(job_id, objective, tool_name=tool_name, status=initial_status, created_at=created_at)
+            registry.write(
+                job_id,
+                objective,
+                tool_name=tool_name,
+                status=initial_status,
+                created_at=created_at,
+                **current_owner_fields(),
+            )
             coroutine = run()
             task = _track(background_tasks, coroutine)
         except BaseException as exc:
@@ -859,7 +895,7 @@ def make_background_delegate(
 
         task.add_done_callback(cancelled_before_step)
         preview = elide(objective)
-        if pre_confirm is not None:
+        if confirm is not None:
             _safe_notify(
                 notify,
                 f"Requesting approval to delegate to {label} (job {job_id[:8]}, real write access): {preview}",
@@ -891,7 +927,7 @@ def make_background_delegate(
                 rejection = validate_model(model)
                 if rejection is not None:
                     return rejection
-            return await _start_and_describe(objective, engine_factory_for_job=engine_factory)
+            return await _start_and_describe(objective, {})
 
         delegate.__doc__ = doc
         return Tool.wrap(delegate, name=tool_name)
@@ -926,8 +962,11 @@ def make_background_delegate(
         if accept_effort_override:
             call_kwargs["effort"] = resolved_effort
 
+        if _prepare_job is not None:
+            call_kwargs = copy.deepcopy(call_kwargs)
         if guard is not None:
-            rejection = await _maybe_await_value(guard(objective, dict(call_kwargs)))
+            guard_kwargs = copy.deepcopy(call_kwargs) if _prepare_job is not None else dict(call_kwargs)
+            rejection = await _maybe_await_value(guard(objective, guard_kwargs))
             if rejection is not None:
                 return rejection
         if validate_model is not None:
@@ -935,10 +974,7 @@ def make_background_delegate(
             if rejection is not None:
                 return rejection
 
-        def _engine_factory_for_job() -> Any:
-            return engine_factory(**call_kwargs)
-
-        return await _start_and_describe(objective, engine_factory_for_job=_engine_factory_for_job)
+        return await _start_and_describe(objective, call_kwargs)
 
     delegate_with_overrides.__doc__ = doc
     schema = _build_delegate_schema(
@@ -1020,7 +1056,9 @@ def make_persistent_consultant(
             try:
                 result = await inner.func(question=question, **call_kwargs)
             except Exception as exc:
-                registry.write(job_id, question, tool_name=tool_name, status="failed", error=str(exc))
+                registry.write(
+                    job_id, question, tool_name=tool_name, status="failed", error=str(exc), **current_owner_fields()
+                )
                 _safe_notify(notify, f"{tool_name} job {job_id[:8]} FAILED: {question[:100]}\n\n{exc}")
                 return
             # Search only the header: the answer body may itself mention a
@@ -1029,7 +1067,7 @@ def make_persistent_consultant(
             match = re.search(rf"{id_field}=({_HANDLE.pattern})", header)
             if match:
                 state["handle"] = match.group(1)
-        registry.write(job_id, question, tool_name=tool_name, status="done", result=result)
+        registry.write(job_id, question, tool_name=tool_name, status="done", result=result, **current_owner_fields())
         preview = elide(result)
         _safe_notify(notify, f"{tool_name} job {job_id[:8]} done: {question[:100]}\n\n{preview}")
 
@@ -1040,7 +1078,7 @@ def make_persistent_consultant(
         # what it has always been.
         async def _ask_plain(question: str) -> str:
             job_id = str(uuid.uuid4())
-            registry.write(job_id, question, tool_name=tool_name, status="running")
+            registry.write(job_id, question, tool_name=tool_name, status="running", **current_owner_fields())
             _track(background_tasks, _run_job(job_id, question))
             preview = elide(question)
             _safe_notify(notify, f"Consulting {tool_name} (job {job_id[:8]}): {preview}")
@@ -1065,7 +1103,7 @@ def make_persistent_consultant(
             if effort is not None and not accept_effort_override:
                 return "REJECTED: this consultant does not support a per-call effort override"
             job_id = str(uuid.uuid4())
-            registry.write(job_id, question, tool_name=tool_name, status="running")
+            registry.write(job_id, question, tool_name=tool_name, status="running", **current_owner_fields())
             _track(background_tasks, _run_job(job_id, question, fresh=fresh, model=model, effort=effort))
             preview = elide(question)
             _safe_notify(notify, f"Consulting {tool_name} (job {job_id[:8]}): {preview}")
@@ -1267,7 +1305,14 @@ def make_parallel_delegate(
             created_at = datetime.now(UTC).isoformat()
             context = None
             try:
-                registry.write(job_id, objective, tool_name="run_parallel", status="running", created_at=created_at)
+                registry.write(
+                    job_id,
+                    objective,
+                    tool_name="run_parallel",
+                    status="running",
+                    created_at=created_at,
+                    **current_owner_fields(),
+                )
                 if job_runner is not None:
                     context = JobContext(
                         job_id,
@@ -1448,16 +1493,23 @@ def make_plan_delegate(
     plan_id = board.plan_id
 
     base_runner = job_runner or JobRunner()
+    custom_lifecycle = job_runner is not None or rollback_claim is not None
 
     async def rollback(context: JobContext) -> None:
         try:
-            if rollback_claim is not None and not context.started:
-                await _maybe_await_value(rollback_claim(context))
+            if not context.started:
+                if rollback_claim is not None:
+                    await _maybe_await_value(rollback_claim(context))
+                elif context.claimed:
+                    reason = str(context.error or "") or "worker did not start"
+                    board.mark_failed(context.task_index, reason, owner=owner)
         finally:
             if base_runner.rollback is not None:
                 await _maybe_await_value(base_runner.rollback(context))
 
-    selected_runner = replace(base_runner, rollback=rollback) if rollback_claim is not None else job_runner
+    selected_runner = (
+        replace(base_runner, rollback=rollback) if rollback_claim is not None or job_runner is None else job_runner
+    )
 
     def capture_attempts(context: JobContext) -> None:
         if rollback_claim is not None:
@@ -1465,27 +1517,6 @@ def make_plan_delegate(
             index = context.task_index
             if index is not None and 0 <= index < len(snapshot):
                 context.attempts_before = snapshot[index].get("attempts", 0)
-
-    def cancel_default_plan(context: JobContext) -> None:
-        if context.claimed and not context.started:
-            board.mark_failed(context.task_index, "delegate_plan_tasks cancelled before execution", owner=owner)
-
-    async def cleanup_setup_failure(context: JobContext, error: BaseException) -> None:
-        if selected_runner is not None:
-            await selected_runner.abort(context, error, phase=context.phase)
-        elif context.claimed:
-            board.mark_failed(context.task_index, f"delegate_plan_tasks setup failed: {error}", owner=owner)
-            registry.write(
-                context.job_id,
-                context.objective,
-                tool_name="delegate_plan_tasks",
-                status="failed",
-                plan_id=plan_id,
-                task_index=context.task_index,
-                plan_task_text=context.plan_task_text,
-                error=f"delegate_plan_tasks setup failed: {error}",
-                execution_started=False,
-            )
 
     async def delegate_plan_tasks(delegations: list[dict[str, Any]]) -> Any:
         def reject(reason: str, code: str) -> Any:
@@ -1567,7 +1598,7 @@ def make_plan_delegate(
                 context.phase = "admission"
                 if stopped_reason is not None:
                     record(number, index, "refused", stopped_reason)
-                    if selected_runner is not None:
+                    if custom_lifecycle:
                         capture_attempts(context)
                         await selected_runner.abort(context, RuntimeError(stopped_reason), phase="admission")
                     continue
@@ -1578,7 +1609,7 @@ def make_plan_delegate(
                         record(number, index, "refused", reason)
                         if stop_on_refusal:
                             stopped_reason = f"not started after refusal at item {number}"
-                        if selected_runner is not None:
+                        if custom_lifecycle:
                             capture_attempts(context)
                             await selected_runner.abort(context, RuntimeError(reason), phase="admission")
                         continue
@@ -1592,7 +1623,7 @@ def make_plan_delegate(
                         record(number, index, "refused", reason)
                         if stop_on_refusal:
                             stopped_reason = f"not started after refusal at item {number}"
-                        if selected_runner is not None:
+                        if custom_lifecycle:
                             capture_attempts(context)
                             await selected_runner.abort(context, RuntimeError(reason), phase="admission")
                         continue
@@ -1603,7 +1634,7 @@ def make_plan_delegate(
                     record(number, index, "refused", claimed)
                     if stop_on_refusal:
                         stopped_reason = f"not started after refusal at item {number}"
-                    if selected_runner is not None:
+                    if custom_lifecycle:
                         await selected_runner.abort(context, RuntimeError(claimed), phase="claim")
                     continue
                 context.claimed = True
@@ -1619,36 +1650,18 @@ def make_plan_delegate(
                     plan_task_text=text,
                     created_at=context.created_at,
                     extra=extra,
+                    **current_owner_fields(),
                 )
-                if selected_runner is not None:
-                    await _schedule_context(context, selected_runner, background_tasks)
-                else:
-                    coroutine = _run_delegate_job(
-                        context.job_id,
-                        objective,
-                        tool_name="delegate_plan_tasks",
-                        label=context.label,
-                        engine_factory=resolved_factory,
-                        registry=registry,
-                        notify=notify,
-                        plan_id=plan_id,
-                        task_index=index,
-                        plan_task_text=text,
-                        created_at=context.created_at,
-                        context=context,
-                    )
-                    _schedule_with_admission_release(
-                        background_tasks, coroutine, context.admission, context=context, on_cancel=cancel_default_plan
-                    )
+                await _schedule_context(context, selected_runner, background_tasks)
                 handed_over = True
                 record(number, index, "started", job_id=context.job_id)
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit) as exc:
                 # Cancellation and process exit must unwind the handoff and propagate;
                 # unlike ordinary setup failures, they are never item outcomes.
-                await cleanup_setup_failure(context, exc)
+                await selected_runner.abort(context, exc, phase=context.phase)
                 raise
             except Exception as exc:
-                await cleanup_setup_failure(context, exc)
+                await selected_runner.abort(context, exc, phase=context.phase)
                 reason = (
                     f"claim_task failed for task {index}: {exc}"
                     if context.phase == "claim"
@@ -1656,7 +1669,7 @@ def make_plan_delegate(
                 )
                 record(number, index, "failed", reason, context.job_id if context.claimed else None)
             finally:
-                if not handed_over and (selected_runner is None or not context._settled):
+                if not handed_over and not context._settled:
                     await refund_admission(context.admission)
 
         if structured_outcomes:

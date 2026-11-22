@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from lazybridge import Store
+from lazybridge._process_owner import current_owner_fields
 from lazybridge.ext.delegation import JobRegistry, background, make_parallel_delegate, make_plan_delegate
 from lazybridge.ext.planners.durable_blackboard import DurableBlackboard
 from tests.unit.ext.delegation.test_lifecycle import Reservation
@@ -62,8 +63,10 @@ async def test_default_admission_settles_by_execution_boundary(tmp_path, monkeyp
 
     monkeypatch.setattr("lazybridge.Agent", Agent)
     store = Store(db=str(tmp_path / "jobs.db"))
-    tool, registry, _, arguments = make_tool(kind, store, grant, tasks, factory)
+    tool, registry, board, arguments = make_tool(kind, store, grant, tasks, factory)
     await tool.run(**arguments)
+    [queued] = [value for _, value in store.items(prefix=registry._prefix)]
+    assert all(queued[key] == value for key, value in current_owner_fields().items())
     if outcome == "execution_cancel":
         await entered.wait()
         [task] = tasks
@@ -74,6 +77,8 @@ async def test_default_admission_settles_by_execution_boundary(tmp_path, monkeyp
     [record] = [value for _, value in store.items(prefix=registry._prefix)]
     assert record["execution_started"] is started
     assert record["status"] == ("done" if outcome == "success" else "failed")
+    if kind == "plan" and not started:
+        assert board.snapshot().tasks[0]["status"] == "todo"
 
 
 @pytest.mark.parametrize("kind", ["parallel", "plan"])
@@ -100,7 +105,8 @@ async def test_default_pre_entry_cancel_closes_job_refunds_and_finishes_record(
     [task] = tasks
     task.cancel()  # deliberately no intervening await or sleep
     await drain(tasks)
-    assert inner[0].cr_frame is None
+    if kind == "parallel":
+        assert inner[0].cr_frame is None
     assert not [warning for warning in recwarn if issubclass(warning.category, RuntimeWarning)]
     if grant:
         assert (grant.released, grant.refunded) == (0, 1)

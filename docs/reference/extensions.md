@@ -108,7 +108,11 @@ serialized consultant conversations, process-local capped parallel fan-out,
 and delegation linked to a [`DurableBlackboard`](#planners) task. Job
 records survive restarts only when backed by a persistent `Store`; executing
 jobs do not resume after restart, and callers should invoke
-`JobRegistry.reclaim_interrupted()` during startup.
+`JobRegistry.reclaim_interrupted()` during startup. The standard delegation
+factories stamp ownership when they create a job. Startup recovery skips
+live owners and legacy records with unknown ownership. After verifying
+that those legacy workers have stopped, call
+`JobRegistry.reclaim_interrupted(reclaim_unowned=True)` to reconcile them.
 
 Promoted from LazyCEO's generic background-delegation infrastructure after
 live production use. Tools produced by the fire-and-forget delegation
@@ -170,8 +174,8 @@ unlike `DurableBlackboard`, it does not represent task state.
 ### Replaceable delegation lifecycle (1.8)
 
 `make_background_delegate`, `make_parallel_delegate`, and `make_plan_delegate`
-accept `job_runner: JobRunner | None = None`. Omitting it preserves the existing
-worker. `JobRunner(prepare=..., register=..., execute=..., finalize=..., rollback=...)`
+accept `job_runner: JobRunner | None = None`. Plan delegation uses a default
+runner when omitted. `JobRunner(prepare=..., register=..., execute=..., finalize=..., rollback=...)`
 exposes four sync or async phases, each receiving the same `JobContext`.
 The default prepare constructs both engine and Agent; register calls
 `JobRegistry.begin_execution(job_id)` to CAS a running, unstarted record to
@@ -213,6 +217,12 @@ Combining a native id and an alias in the same factory call raises ValueError.
 The engines resolve and bind aliases through `lazybridge.engines.sessions`;
 reconstructing the writer and registry after restart resumes the saved native id.
 
+`make_codex_writer` shows the workspace, selected session, and extra writable
+roots in the approval prompt. The request digest covers the complete objective
+and resolved call options. The built-in writer uses the confirmed paths and
+checks the alias binding before launching the runtime. Custom factories own
+the resolution of settings they derive outside those call options.
+
 `make_codex_writer_engine_factory(*, workspace_root, gate, model=None, effort=None,
 session_alias=None, session_registry=None, writable_roots=None)` returns a callable
 accepting keyword `cwd`, `model`, `effort`, `session`, `session_alias`, and
@@ -244,13 +254,13 @@ expected owner, job id, and attempt count before restoring a claimed item. It
 must also refuse to release a claim if another worker is executing that same job.
 This package does not implement the caller's board ownership or restoration policy.
 
-Supplying `rollback_claim` enables the CAS runner and composes the claim hook with
-an optional `job_runner.rollback`; the latter still receives failures after real
-execution starts. Grants settle once even if rollback raises. Claim metadata is
-also persisted in the initial job record. Omitting the claim hook keeps the
-existing scheduling-failure unwind through `board.mark_failed`. A compatible board
-for the new hook provides `snapshot().tasks` with `attempts`, in addition to
-`claim_task`. The callback may be sync or async.
+Supplying `rollback_claim` composes the claim hook with `job_runner.rollback`
+when provided. The latter still receives failures after execution starts.
+Grants settle once even if rollback raises. Claim metadata is also persisted
+in the initial job record. The default runner releases claims through
+`board.mark_failed` when setup or scheduling fails before execution. A board
+using a custom claim hook provides `snapshot().tasks` with `attempts`, in
+addition to `claim_task`. The hook may be sync or async.
 
 `structured_outcomes=True` returns a JSON-compatible dictionary from the tool:
 

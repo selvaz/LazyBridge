@@ -5,8 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from lazybridge import Store
-from lazybridge.ext.delegation import jobs as jobs_module
+from lazybridge import Store, _process_owner
 from lazybridge.ext.delegation.jobs import (
     DEFAULT_JOB_PREFIX,
     JobRegistry,
@@ -72,7 +71,8 @@ def test_reclaim_interrupted_marks_only_orphanable_states() -> None:
     registry.write("waiting", "y", tool_name="delegate", status="awaiting_approval")
     registry.write("done", "z", tool_name="delegate", status="done", result="ok")
 
-    assert registry.reclaim_interrupted() == ["running", "waiting"]
+    assert registry.reclaim_interrupted() == []
+    assert registry.reclaim_interrupted(reclaim_unowned=True) == ["running", "waiting"]
     assert registry.find("running")["status"] == "interrupted"
     assert registry.find("waiting")["status"] == "interrupted"
     assert registry.find("done")["status"] == "done"
@@ -92,7 +92,7 @@ def test_reclaim_interrupted_does_not_clobber_concurrent_completion() -> None:
 
     store.items = items_that_race  # type: ignore[method-assign]
 
-    assert registry.reclaim_interrupted() == []
+    assert registry.reclaim_interrupted(reclaim_unowned=True) == []
     assert store.read(key)["status"] == "done"
     assert store.read(key)["result"] == "finished for real"
 
@@ -259,7 +259,7 @@ def test_reclaim_interrupted_skips_a_job_owned_by_a_still_alive_process() -> Non
     registry.write("alive", "x", tool_name="delegate", status="running", **current_owner_fields())
     registry.write("orphan", "y", tool_name="delegate", status="running")  # no owner stamp at all
 
-    assert registry.reclaim_interrupted() == ["orphan"]
+    assert registry.reclaim_interrupted(reclaim_unowned=True) == ["orphan"]
     assert registry.find("alive")["status"] == "running"
     assert registry.find("orphan")["status"] == "interrupted"
 
@@ -268,7 +268,7 @@ def test_reclaim_interrupted_reclaims_a_job_owned_by_a_dead_pid(monkeypatch: pyt
     """A record naming a DIFFERENT boot id (a process that no longer
     exists, or was replaced) must be checked against the real process
     table, not assumed alive just because *a* pid is present."""
-    monkeypatch.setattr(jobs_module, "_pid_is_running", lambda pid, **kwargs: False)
+    monkeypatch.setattr(_process_owner, "_pid_is_running", lambda pid: False)
     store = Store()
     registry = JobRegistry(store)
     registry.write(
@@ -284,7 +284,7 @@ def test_reclaim_interrupted_treats_an_unknown_foreign_pid_as_alive(monkeypatch:
     failure/timeout/unexpected output -- wrongly treating a live writer as
     dead risks a second worker starting on top of it, worse than leaving a
     job alone for one more sweep."""
-    monkeypatch.setattr(jobs_module, "_pid_is_running", lambda pid, **kwargs: True)
+    monkeypatch.setattr(_process_owner, "_pid_is_running", lambda pid: True)
     store = Store()
     registry = JobRegistry(store)
     registry.write(
@@ -295,9 +295,7 @@ def test_reclaim_interrupted_treats_an_unknown_foreign_pid_as_alive(monkeypatch:
     assert registry.find("foreign")["status"] == "running"
 
 
-def test_job_owner_is_alive_rejects_malformed_owner_fields() -> None:
-    from lazybridge.ext.delegation.jobs import _job_owner_is_alive
-
-    assert _job_owner_is_alive({}) is False
-    assert _job_owner_is_alive({"owner_pid": "not-an-int", "owner_boot_id": "x"}) is False
-    assert _job_owner_is_alive({"owner_pid": 1, "owner_boot_id": None}) is False
+def test_owner_is_alive_reports_unknown_for_malformed_owner_fields() -> None:
+    assert _process_owner.owner_is_alive({}) is None
+    assert _process_owner.owner_is_alive({"owner_pid": "not-an-int", "owner_boot_id": "x"}) is None
+    assert _process_owner.owner_is_alive({"owner_pid": 1, "owner_boot_id": None}) is None

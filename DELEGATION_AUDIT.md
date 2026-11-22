@@ -12,7 +12,7 @@ Severity totals at baseline are **0 confirmed critical, 7 high, and 6 medium**. 
 
 ### A2 — Bind writer confirmation to the effective delegation
 
-**Open.** The confirmation and durable approval reuse depend on the rendered request. The effective destination and session can differ between delegations that appear identical to the approver. Freeze the resolved delegation before asking, show the target and session, and bind the approval to a digest of the full request and its scope. Require a fresh decision if the target, options, or objective changes. [Writer confirmation](lazybridge/ext/delegation/writers.py) · [Approval queue](lazybridge/ext/approval/queue.py)
+**Fixed for the built-in Codex writer.** Confirmations show the resolved workspace, session, and extra writable roots. The digest covers the full objective and call options, so durable approval reuse binds to the request even when the displayed objective is shortened. Execution checks the approved alias binding before launching Codex. Custom factories remain responsible for settings they derive outside the supplied options. [Writer confirmation](lazybridge/ext/delegation/writers.py) · [Approval queue](lazybridge/ext/approval/queue.py)
 
 ### A3 — Propagate a denied or failed result as an error
 
@@ -20,19 +20,19 @@ Severity totals at baseline are **0 confirmed critical, 7 high, and 6 medium**. 
 
 ### A4 — Prevent takeover of a live Plan checkpoint
 
-**Open.** Two runs using `resume=True` can execute the same step when a second run takes over an active checkpoint. The first run's compare-and-swap failure occurs after the step may have performed side effects. Persist an owner and renewable lease, reconcile ambiguous recovery states, and use attempt tokens or idempotency keys at effect boundaries. With two SQLite processes, verify that a live run retains ownership and a dead run can be resumed. [Checkpoint claim](lazybridge/engines/plan/_checkpoint.py)
+**Fixed for recovery on one host.** Plan checkpoints carry an owner stamp and run ID. Acquisition checks that ownership before retrying an active checkpoint and assigns an active claim before replaying a paused or failed step. The SQLite regression covers recovery while a second process lives and after it exits. Active legacy checkpoints require explicit reconciliation. External side effects still need idempotency keys or an equivalent replay policy. [Checkpoint claim](lazybridge/engines/plan/_checkpoint.py)
 
 ### A5 — Keep a blackboard claim valid for the worker's lifetime
 
-**Open.** A live worker can outlast a `DurableBlackboard` claim, allowing a second worker to start on the same task. The default worker can also leave a claim active after a factory failure. Link the job to a unique claim attempt, renew its lease, fence rollback and result publication, and release claims when setup fails. Validate lease expiry, stale completion, and pre-start failure with independently controlled workers. [Plan delegation](lazybridge/ext/delegation/background.py) · [DurableBlackboard](lazybridge/ext/planners/durable_blackboard.py)
+**Pre-start rollback fixed.** The default plan runner releases the board claim after a factory or Agent setup failure. A live worker can still outlast a `DurableBlackboard` claim and let another attempt start. Link the job to a unique claim attempt, renew its lease, and fence rollback and result publication. Validate lease expiry and stale completion with independently controlled workers. [Plan delegation](lazybridge/ext/delegation/background.py) · [DurableBlackboard](lazybridge/ext/planners/durable_blackboard.py)
 
 ### A6 — Preserve live jobs during startup recovery
 
-**Open.** Standard delegate records lack a process owner. On a shared Store, startup recovery can mark a live job interrupted and prevent its runner from executing. Stamp ownership at enqueue time and preserve it through conditional transitions. Reconcile legacy records without owners explicitly. Verify a rolling restart with a live worker and a terminated worker over the same SQLite database. [Job creation](lazybridge/ext/delegation/background.py) · [Job recovery](lazybridge/ext/delegation/jobs.py)
+**Fixed for standard delegates.** Job records carry the worker process owner from enqueue time. Startup recovery consults liveness and uses compare-and-swap to mark abandoned jobs interrupted. Unknown legacy ownership requires an explicit `reclaim_unowned=True` reconciliation. The shared SQLite regression verifies both live and exited process owners. [Job creation](lazybridge/ext/delegation/background.py) · [Job recovery](lazybridge/ext/delegation/jobs.py)
 
 ### A7 — Stop automatic replay after an uncertain outcome
 
-**Agent replay fixed on this branch.** `CodexTurnUncertain` now sets `ErrorInfo.outcome_uncertain` on the returned envelope. `Agent.run()`, `Agent.stream()`, and verified agent tools preserve an uncertain outcome without calling a fallback or starting another execution. Targeted tests exercise writer and reviewer failures. Checkpoint recovery and external retry callers should honor the same signal as part of A4–A6. [Error envelope](lazybridge/envelope.py) · [Agent](lazybridge/agent.py) · [Verification](lazybridge/_verify.py)
+**Agent and Plan replay fixed on this branch.** `CodexTurnUncertain` now sets `ErrorInfo.outcome_uncertain` on the returned envelope. `Agent.run()`, `Agent.stream()`, and verified agent tools preserve an uncertain outcome without calling a fallback or starting another execution. Plan checkpoints hold uncertain steps and parallel bands for reconciliation before replay. External retry callers should honor the same signal. [Error envelope](lazybridge/envelope.py) · [Agent](lazybridge/agent.py) · [Checkpoint claim](lazybridge/engines/plan/_checkpoint.py)
 
 ## Medium
 
@@ -47,6 +47,6 @@ Severity totals at baseline are **0 confirmed critical, 7 high, and 6 medium**. 
 
 ## Delivery order
 
-1. Finish the approval and result boundaries in A2 and A3. Verify that each approval is scoped to the resolved request and guard denials stay within the intended reporting channels.
-2. Align checkpoint, claim, and job ownership across A4–A6. Exercise takeover, stale completion, cancellation, and restart against a shared SQLite database.
+1. Finish A3 by applying the output guard's disclosure policy to child-engine traces emitted before the decision.
+2. Finish A5 with attempt ownership on the board. Exercise lease renewal, stale completion, cancellation, and restart against a shared SQLite database.
 3. Add the runtime regressions in M1–M6 through public entry points, including the common cases of a named Plan target and an aliased agent tool.

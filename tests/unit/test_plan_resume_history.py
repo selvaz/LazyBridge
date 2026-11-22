@@ -130,7 +130,7 @@ def test_resume_legacy_v1_checkpoint_does_not_crash():
         "next_step": "b",
         "kv": {"a_out": "A-out"},
         "completed_steps": ["a"],
-        "status": "running",
+        "status": "paused",
         "run_uid": "legacy-run",
         # NB: no 'history' key, no 'checkpoint_version'.
     }

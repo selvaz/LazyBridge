@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
+import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from pathlib import Path
+from functools import partial
+from pathlib import Path, PurePath
+from types import EllipsisType
 from typing import Any
 
 from lazybridge import Tool
-from lazybridge._display import elide
-from lazybridge.engines.sessions import SessionRegistry
+from lazybridge._display import CWD_BUDGET, elide
+from lazybridge.engines.sessions import SessionRegistry, default_session_registry
 from lazybridge.ext.delegation.background import ExtraParam, make_background_delegate
 from lazybridge.ext.delegation.jobs import JobRegistry
 from lazybridge.ext.delegation.lifecycle import JobRunner
@@ -64,12 +68,13 @@ def make_codex_writer_engine_factory(
         session: str | None = None,
         session_alias: str | _DefaultAlias | None = _DEFAULT_ALIAS,
         writable_roots: Sequence[str] | None = writable_roots,
+        _expected_alias_thread: str | EllipsisType | None = Ellipsis,
     ) -> Any:
         from lazybridge.engines.codex import CodexEngine
 
         resolved_alias = _resolve_alias(session, session_alias, configured_alias)
         selected_config = config
-        if writable_roots:
+        if writable_roots is not None:
             selected_config = dataclasses.replace(
                 config, codex=dataclasses.replace(config.codex, writable_roots=tuple(writable_roots))
             )
@@ -80,6 +85,8 @@ def make_codex_writer_engine_factory(
             extra["thread_id"] = session
         if resolved_alias is not None:
             extra["session_alias"] = resolved_alias
+        if _expected_alias_thread is not Ellipsis:
+            extra["_expected_alias_thread"] = _expected_alias_thread
         if session_registry is not None:
             extra["session_registry"] = session_registry
         return CodexEngine(model=model, cwd=str(cwd), config=selected_config, request_timeout=None, **extra)
@@ -155,6 +162,12 @@ def _writer_params(
     return params
 
 
+def _encode_path(value: object) -> str:
+    if isinstance(value, PurePath):
+        return str(value)
+    raise TypeError(f"Unsupported confirmation option type {type(value).__name__}")
+
+
 def make_codex_writer(
     *,
     workspace_root: Path,
@@ -212,7 +225,18 @@ def make_codex_writer(
     is forwarded as ``CodexEngine(thread_id=...)``, resuming that thread
     instead of starting a new one. All three default to ``False``, keeping
     today's fixed-at-build-time behaviour the default.
+
+    Confirmation binds the full objective and resolved call options before the
+    worker is scheduled. The built-in factory also binds the workspace,
+    writable roots and native thread currently selected by a session alias.
+    Custom factories own any further resolution they do from those options.
     """
+    if (
+        engine_factory is None
+        and session_registry is None
+        and (session_alias is not None or accept_session_alias_override)
+    ):
+        session_registry = default_session_registry()
     factory = engine_factory or make_codex_writer_engine_factory(
         workspace_root=workspace_root,
         gate=gate,
@@ -223,9 +247,57 @@ def make_codex_writer(
         writable_roots=writable_roots,
     )
 
-    async def _confirm(objective: str) -> bool:
-        preview = elide(objective)
-        return await channel.ask(confirmation_prompt.format(preview=preview))
+    configured_roots = tuple(writable_roots) if writable_roots is not None else ()
+
+    def _prepare_job(
+        objective: str, call_kwargs: dict[str, Any]
+    ) -> tuple[Callable[[], Any], Callable[[], Awaitable[bool]]]:
+        cwd = Path(call_kwargs.get("cwd", workspace_root)).expanduser().resolve()
+        roots = call_kwargs.get("writable_roots", configured_roots)
+        if isinstance(roots, (str, bytes)):
+            raise TypeError("writable_roots must be an array of paths")
+        writable = tuple(str((cwd / Path(root).expanduser()).resolve()) for root in roots or ())
+        thread_id = call_kwargs.get("session")
+        alias = _resolve_alias(thread_id, call_kwargs.get("session_alias", _DEFAULT_ALIAS), session_alias)
+        selected_thread = session_registry.resolve("codex", cwd, alias) if alias and session_registry else thread_id
+        scope = {
+            "objective": objective,
+            "cwd": str(cwd),
+            "writable_roots": writable,
+            "model": call_kwargs.get("model", model),
+            "effort": call_kwargs.get("effort", effort),
+            "session_alias": alias,
+            "thread_id": selected_thread,
+            "options": call_kwargs,
+        }
+        encoded = json.dumps(scope, sort_keys=True, ensure_ascii=False, allow_nan=False, default=_encode_path)
+        fingerprint = hashlib.sha256(encoded.encode()).hexdigest()
+        session_description = (
+            f"{alias} ({selected_thread or 'new thread'})" if alias else selected_thread or "new thread"
+        )
+        roots_description = ", ".join(writable) or "none"
+        workspace_label = (
+            "Configured workspace" if engine_factory is not None and "cwd" not in call_kwargs else "Workspace"
+        )
+        repo = call_kwargs.get("repo")
+        repo_line = f"Repository {elide(str(repo), 120)}\n" if repo is not None else ""
+        details = (
+            f"{workspace_label} {elide(str(cwd), CWD_BUDGET // 2)}\n"
+            f"{repo_line}"
+            f"Session {elide(str(session_description), 160)}\n"
+            f"Extra writable roots {elide(roots_description, CWD_BUDGET // 2)}\n"
+            f"Request SHA-256 {fingerprint}"
+        )
+        prompt = confirmation_prompt.format(preview=elide(objective)) + "\n\n" + details
+        if engine_factory is None:
+            call_kwargs = {**call_kwargs, "cwd": cwd, "writable_roots": writable}
+            if alias is not None:
+                call_kwargs["_expected_alias_thread"] = selected_thread
+
+        async def confirm() -> bool:
+            return await channel.ask(prompt)
+
+        return partial(factory, **call_kwargs), confirm
 
     params = _writer_params(
         extra_params,
@@ -241,7 +313,7 @@ def make_codex_writer(
         registry=registry,
         background_tasks=background_tasks,
         notify=notify,
-        pre_confirm=_confirm,
+        _prepare_job=_prepare_job,
         doc=doc,
         model=model,
         effort=effort,

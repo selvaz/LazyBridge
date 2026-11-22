@@ -2332,9 +2332,9 @@ def test_job_owner_is_alive_rejects_a_recycled_pid_with_a_different_boot_id() ->
     to a process-table check would trivially see THIS process (it has
     that pid) and wrongly report the old, dead owner as alive. Found by
     Codex review before this ever shipped."""
-    from lazybridge.ext.delegation.jobs import _job_owner_is_alive
+    from lazybridge._process_owner import owner_is_alive
 
-    assert _job_owner_is_alive({"owner_pid": os.getpid(), "owner_boot_id": "a-different-boot-id"}) is False
+    assert owner_is_alive({"owner_pid": os.getpid(), "owner_boot_id": "a-different-boot-id"}) is False
 
 
 async def test_ask_only_one_of_two_concurrent_identical_calls_wins_one_approval() -> None:

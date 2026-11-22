@@ -55,7 +55,7 @@ The persisted object captures three things:
 - `completed_steps` + `status` — bookkeeping for the resume logic
   to decide what to skip.
 
-Five state transitions:
+Checkpoint states:
 
 - **Claimed** — `status="claimed"`, transient. Written via CAS
   before any step runs so two concurrent fresh runs collide here
@@ -77,6 +77,9 @@ Five state transitions:
 - **Done** — `status="done"`, `next_step=None`. A subsequent
   `resume=True` short-circuits and returns an envelope whose
   payload is the cached `kv`.
+- **Uncertain** — `status="uncertain"` holds a step or parallel band
+  that reported `ErrorInfo.outcome_uncertain`. Inspect the earlier
+  attempt and reconcile its effects before replaying it.
 
 The persisted `history` field (v2 only) is a serialised
 `StepResult` list — a resumed run rebuilds in-memory step history
@@ -97,6 +100,18 @@ same `checkpoint_key` at once:
   `resume=True`** (raises `PlanCompileError` at construction). Use
   for fan-out workflows where many runs share the same plan
   shape.
+
+Active checkpoints carry a process stamp and run ID. Recovery checks the
+owner on the same host. A live owner retains its claim, including when the
+checkpoint being resumed was previously paused or failed. Upgrade all Plan
+runners that share a Store before relying on this ownership check across
+rolling restarts.
+
+For an active legacy checkpoint with no process stamp, first verify that
+the old worker has stopped. For legacy or uncertain checkpoints, once
+replay is safe, compare-and-swap the observed snapshot to `status="paused"`
+while preserving its `next_step`, `kv`, and history. A normal `resume=True`
+run can then claim that checkpoint.
 
 ## When to use it
 

@@ -38,6 +38,7 @@ from lazybridge import (
     Store,
     from_step,
 )
+from lazybridge._process_owner import current_owner_fields
 from lazybridge.core.providers.anthropic import AnthropicProvider
 from lazybridge.core.providers.deepseek import DeepSeekProvider
 from lazybridge.core.types import AudioContent, CompletionRequest, Message, Role, TextContent
@@ -333,6 +334,7 @@ def test_resume_replays_store_sidecar_writes():
             "status": "running",
             "run_uid": "prior-run",
             "history": [],
+            **current_owner_fields(),
         },
     )
     # Confirm the sidecar key is absent (the lost write).

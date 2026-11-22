@@ -114,10 +114,9 @@ inner step; on parent resume, the sub-plan re-ran **from the top** —
 `inner_1` executed again even though it had already succeeded. Nest along
 boundaries where "redo the whole phase" is acceptable and cheap.
 
-To make the sub-plan resumable in its own right you need **all three**
-settings, not two — `store=`, `checkpoint_key=`, **and `resume=True`**;
-`resume` defaults to `False` and the checkpoint loader refuses to load
-anything without it (`engines/plan/_checkpoint.py`, `_load_checkpoint`).
+To resume the sub-plan from its own checkpoint, set `store=`,
+`checkpoint_key=`, and `resume=True`. See
+[checkpoint recovery](full/checkpoint.md) for the ownership rules.
 
 **Do not use when:** the sub-steps must be individually routable or
 resumable from the parent. Flatten them.
