@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -78,6 +79,17 @@ def main():
         target = destination / name
         if source.exists():
             shutil.copytree(source, target)
+            old_runs = sorted(
+                (
+                    path
+                    for path in source.parent.iterdir()
+                    if path.is_dir() and not path.is_symlink() and re.fullmatch(r"\d{8}-\d{6}-\d{6}", path.name)
+                ),
+                key=lambda path: path.name,
+                reverse=True,
+            )
+            for old in old_runs[5:]:
+                shutil.rmtree(old)
         else:
             target.mkdir()
         (target / "process.log").write_text(output, encoding="utf-8")

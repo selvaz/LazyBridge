@@ -16,7 +16,7 @@ NAME = Path(__file__).stem
 class BlockingEngine:
     async def run(self, env, **kwargs):
         (scenario_dir(NAME) / "worker-ready").touch()
-        await asyncio.Event().wait()
+        await asyncio.wait_for(asyncio.Event().wait(), timeout=60)
 
 
 async def owner(directory):
@@ -32,7 +32,7 @@ async def owner(directory):
             doc="Run a background job",
         )
         await tool.run(objective="blocked job")
-        await asyncio.Event().wait()
+        await asyncio.wait_for(asyncio.Event().wait(), timeout=60)
 
 
 def run(directory):

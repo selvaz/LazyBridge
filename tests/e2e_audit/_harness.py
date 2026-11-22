@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -19,8 +20,10 @@ WORK = Path("D:/work/_tmp/lb-e2e")
 
 
 def scenario_dir(name):
-    run_id = os.environ.get("LB_E2E_RUN_ID")
-    return WORK / name / run_id if run_id else WORK / name
+    run_id = os.environ.get("LB_E2E_RUN_ID", "standalone")
+    if Path(run_id).name != run_id or run_id in ("", ".", ".."):
+        raise ValueError("Invalid run ID")
+    return WORK / name / run_id
 
 
 def environment():
@@ -131,6 +134,10 @@ def write_evidence(directory, before):
 
 def scenario(name, finding, expected, run):
     directory = scenario_dir(name)
+    if directory.is_symlink():
+        raise RuntimeError(f"Refusing to clean a symlink: {directory}")
+    if directory.exists():
+        shutil.rmtree(directory)
     directory.mkdir(parents=True, exist_ok=True)
     before = snapshot(directory)
     started = time.monotonic()

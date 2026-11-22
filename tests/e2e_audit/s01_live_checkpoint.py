@@ -21,7 +21,10 @@ def plan(directory, resume):
 
     async def second(task):
         (directory / "entered").touch()
+        deadline = time.monotonic() + 60
         while not (directory / "release").exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("release signal not received")
             await asyncio.sleep(0.05)
         return "second complete"
 
