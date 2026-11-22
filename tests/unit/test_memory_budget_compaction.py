@@ -152,3 +152,17 @@ def test_summary_keeps_the_ten_turn_rule_and_also_honours_the_budget() -> None:
 
 def test_default_memory_keeps_a_4000_token_budget() -> None:
     assert Memory().max_tokens == 4000
+
+
+def test_word_dense_summary_does_not_force_compaction_on_every_add() -> None:
+    """A summarizer returning many short words must be capped by the word estimate."""
+    calls: list[str] = []
+
+    def chatty(prompt: str) -> str:
+        calls.append(prompt)
+        return "a " * 60
+
+    memory = Memory(strategy="auto", max_tokens=100, summarizer=chatty)
+    for index in range(30):
+        memory.add(" ".join(f"w{index}x{k}" for k in range(10)), "ok")
+    assert len(calls) < 10, f"summarizer called {len(calls)} times in 30 adds"

@@ -390,7 +390,15 @@ class Memory:
         # LLM-produced summary after a timeout or error.
         if summary.startswith("[Earlier conversation covered:"):
             max_chars = max(max_chars, len("[Earlier conversation covered: ]"))
-        return _truncate_summary(summary, max_chars=max_chars)
+        capped = _truncate_summary(summary, max_chars=max_chars)
+        # The trigger estimates words, not characters: also bound the word-based
+        # estimate, otherwise a summary of many short words can stay over its
+        # share and force a new compaction (and summarizer call) on every add.
+        budget_share = max(1, int(self.max_tokens * self._SUMMARY_SHARE))
+        words = capped.split()
+        while words and _estimate_text_tokens(" ".join(words)) > budget_share:
+            words = words[: max(1, int(len(words) * 0.9))] if len(words) > 1 else []
+        return " ".join(words) if words != capped.split() else capped
 
     def _llm_summary(self, turns: list[_Turn], *, prior: str = "") -> str:
         """Call the LLM summarizer on ``turns``; fall back to _rule_summary on error.

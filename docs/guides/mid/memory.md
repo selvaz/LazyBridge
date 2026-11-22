@@ -37,7 +37,7 @@ Pass to an `Agent` via `memory=mem` (private to that agent) or
 |---|---|---|
 | `"auto"` | Sliding window + summary of older turns once `max_tokens` is exceeded | General chat, the safe default |
 | `"sliding"` | Drops oldest turns whenever > 10 are retained; works without `max_tokens` | Cheap, lossy, no LLM cost |
-| `"summary"` | Summarises older turns at 10 turns (legacy default), or when an explicit `max_tokens` is exceeded | Higher fidelity at the cost of summariser tokens |
+| `"summary"` | Summarises older turns once more than 15 are stored (keeping the latest 10), or earlier when `max_tokens` is exceeded | Higher fidelity at the cost of summariser tokens |
 | `"none"` | Never compress; only `max_turns` bounds the buffer | You want full history and have explicit control over size |
 
 ## Synopsis
@@ -58,12 +58,15 @@ ordinary turn.
 
 ### Migration note
 
-The default stays `max_tokens=4000`. `strategy="summary"` keeps its ten-turn
-trigger and now also compacts when the stored text exceeds the budget;
+The default stays `max_tokens=4000`. `strategy="summary"` keeps a turn
+trigger (now in batches: more than 15 turns, keeping the latest 10, instead of
+re-summarising on every turn after the tenth) and also compacts when the
+stored text exceeds the budget;
 `"auto"` compacts when the stored text exceeds the budget (estimated from the
 text, so cached provider input no longer hides it). Pass `max_tokens=None` to
-disable the budget: `auto` then never compacts, `summary` uses only the
-ten-turn trigger. The legacy
+disable the budget: `auto` then never compacts, `summary` uses only its turn
+trigger. `"sliding"` with a configured `summarizer=` still summarises on every
+add once more than ten turns are stored, as before. The legacy
 `Memory.add(..., tokens=n)` parameter is still accepted but emits a
 `DeprecationWarning` and is ignored because provider usage is not stored-memory
 size. Persisted estimates are recalculated from their text when loaded.
