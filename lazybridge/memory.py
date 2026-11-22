@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import inspect
-import math
 import re
 import threading
 import warnings
@@ -102,7 +101,7 @@ class Memory:
             cap applies.
         max_tokens:
             Optional approximate token budget for remembered text. Size is
-            estimated as characters / 4 and is independent of provider
+            estimated as 1.3 tokens per word and is independent of provider
             billing/cache counters. When omitted, the legacy count rules
             apply: ``"summary"`` compacts after ten turns and ``"auto"``
             does not compact.
@@ -374,6 +373,11 @@ class Memory:
         if self.max_tokens is None:
             return summary
         max_chars = max(1, int(self.max_tokens * self._SUMMARY_SHARE * 4))
+        # Keep the fallback's marker intact even under unrealistically tiny
+        # budgets: callers use it to distinguish extractive recovery from an
+        # LLM-produced summary after a timeout or error.
+        if summary.startswith("[Earlier conversation covered:"):
+            max_chars = max(max_chars, len("[Earlier conversation covered: ]"))
         return _truncate_summary(summary, max_chars=max_chars)
 
     def _llm_summary(self, turns: list[_Turn], *, prior: str = "") -> str:
@@ -508,12 +512,14 @@ class Memory:
 
 
 def _estimate_text_tokens(text: str) -> int:
-    """Conservative tokenizer-free estimate for the text Memory stores."""
-    return math.ceil(len(text) / 4)
+    """Estimate stored text with the documented tokenizer-free heuristic."""
+    words = len(text.split())
+    return max(1, int(words * 1.3)) if words else 0
 
 
 def _estimate_turn_tokens(user: str, assistant: str) -> int:
-    return _estimate_text_tokens(f"User: {user}\nAssistant: {assistant}")
+    # Labels are added only when rendering; budget the caller's stored fields.
+    return _estimate_text_tokens(f"{user} {assistant}")
 
 
 def _truncate_summary(summary: str, *, max_chars: int) -> str:

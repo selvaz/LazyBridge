@@ -28,7 +28,7 @@ Methods: `add`, `messages`, `text`, `clear`, `amend_last`. When a coding
 engine resumes a durable native conversation, `Memory` is no longer prepended
 (the runtime holds the history) but it keeps recording completed answers.
 For `auto` and `summary`, `max_tokens` is estimated from stored text as
-characters/4 rather than provider usage (cached text still counts).
+1.3 tokens per word rather than provider usage (cached text still counts).
 Compaction preserves the latest 10 turns verbatim and calls `summarizer=` only
 when the text budget is exceeded and there are older turns to compact.
 

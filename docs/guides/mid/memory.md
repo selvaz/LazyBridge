@@ -48,7 +48,7 @@ several agents that share the instance). The default `"auto"` strategy preserves
 Set `max_tokens=` to opt into token-budget compaction.
 
 `max_tokens` measures the remembered text itself with a conservative
-characters/4 estimate. It does not use provider billing counters, so cached
+1.3-tokens-per-word estimate. It does not use provider billing counters, so cached
 input still counts. After budget compaction, memory targets 60% of the budget:
 the summary is capped and the verbatim tail shrinks as needed, but retains at
 least two turns. This hysteresis avoids invoking an LLM summariser on every

@@ -176,14 +176,14 @@ def test_memory_compression_does_not_hold_lock() -> None:
         finish.wait(timeout=5.0)
         return "summary"
 
-    mem = Memory(strategy="summary", max_tokens=10, summarizer=_summariser)
-    # Bootstrap memory past the 10-turn threshold so the next .add()
-    # triggers compression.
-    for i in range(11):
-        mem.add(f"q{i}", f"a{i}", tokens=100)
+    mem = Memory(strategy="summary", max_tokens=100, summarizer=_summariser)
+    # Bootstrap to the 10-turn threshold so the threaded .add() is the one
+    # that triggers compression.
+    for i in range(10):
+        mem.add(f"q{i} one two", f"a{i} three four", tokens=100)
 
     def _trigger_compression() -> None:
-        mem.add("trigger", "trigger-resp", tokens=100)
+        mem.add("trigger " + "request " * 12, "trigger-resp " + "answer " * 11, tokens=100)
 
     def _other_caller() -> None:
         started.wait(timeout=2.0)

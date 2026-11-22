@@ -112,7 +112,7 @@ def test_auto_under_threshold_no_compression():
 def test_auto_over_threshold_compresses():
     m = Memory(strategy="auto", max_tokens=100)
     for i in range(15):
-        m.add(f"q{i}", f"a{i}", tokens=50)
+        m.add(f"q{i} " + "question " * 5, f"a{i} " + "answer " * 5, tokens=50)
     assert len(m._turns) <= 10
 
 

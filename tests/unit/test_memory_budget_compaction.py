@@ -13,7 +13,7 @@ def _fill(memory: Memory, *, turns: int = 11, tokens: int = 1) -> None:
 
 
 def test_summary_compacts_when_remembered_text_exceeds_budget() -> None:
-    memory = Memory(strategy="summary", max_tokens=100)
+    memory = Memory(strategy="summary", max_tokens=70)
     _fill(memory)
 
     assert memory._summary
@@ -44,7 +44,7 @@ def test_summarizer_is_called_only_when_budget_compaction_happens() -> None:
 
 
 def test_recent_window_preserves_facts_verbatim() -> None:
-    memory = Memory(strategy="summary", max_tokens=100)
+    memory = Memory(strategy="summary", max_tokens=70)
     memory.add("Old background sentence.", "Old answer sentence.")
     for index in range(9):
         memory.add(f"Recent filler {index}.", f"Recent answer {index}.")
@@ -64,9 +64,9 @@ def test_text_estimate_does_not_depend_on_provider_cache_tokens() -> None:
 
 
 def test_extractive_fallback_keeps_complete_sentences_and_named_entities() -> None:
-    memory = Memory(strategy="summary", max_tokens=100)
+    memory = Memory(strategy="summary", max_tokens=90)
     memory.add("Project ORCHID launches on Tuesday.", "TEMPEST remains the rollback plan.")
-    for index in range(10):
+    for index in range(14):
         memory.add(f"Filler sentence number {index}.", "Acknowledged.")
 
     assert "Project ORCHID launches on Tuesday." in memory._summary
@@ -77,7 +77,7 @@ def test_budget_compaction_uses_hysteresis_and_calls_summarizer_once_per_add() -
     calls: list[str] = []
     memory = Memory(
         strategy="summary",
-        max_tokens=120,
+        max_tokens=90,
         summarizer=lambda prompt: calls.append(prompt) or ("A bounded summary. " * 100),
     )
 
@@ -88,7 +88,7 @@ def test_budget_compaction_uses_hysteresis_and_calls_summarizer_once_per_add() -
         previous_calls = len(calls)
 
     assert len(memory._turns) == 2
-    assert len(memory._summary) <= int(120 * memory._SUMMARY_SHARE * 4)
+    assert len(memory._summary) <= int(90 * memory._SUMMARY_SHARE * 4)
     # Oversized mandatory tails use the bounded local fallback instead of
     # paying for an LLM summary on every add.
     assert calls == []
