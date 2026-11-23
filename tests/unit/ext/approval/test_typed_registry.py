@@ -175,9 +175,7 @@ def test_legacy_decision_and_consumption_paths_refuse_typed_ticket(
     assert not queue.reject_ticket(rejected.approval_id, actor="anyone", channel="legacy", reason="no")
 
     decided = queue.create_typed_ticket(request(task_id="task-3"), prompt="Reusable")
-    assert queue.decide_typed_ticket(
-        decided.approval_id, approver=ApproverContext(actor="owner"), verdict="approved"
-    )
+    assert queue.decide_typed_ticket(decided.approval_id, approver=ApproverContext(actor="owner"), verdict="approved")
     assert not queue.claim_earlier_approval(task_id="task-3", prompt="Reusable")
     assert not queue.mark_approval_consumed(decided.approval_id)
 
