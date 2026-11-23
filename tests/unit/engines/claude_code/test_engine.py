@@ -86,6 +86,7 @@ def test_initialize_timeout_is_first_class_option():
 def test_initialize_control_timeout_spends_request_budget():
     class InitializingSdk(AgentSdkClient):
         def __init__(self):
+            super().__init__()
             self.calls = 0
 
         async def run(self, prompt, *, options, attachments=()):

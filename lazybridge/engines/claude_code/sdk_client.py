@@ -353,10 +353,13 @@ async def _with_stderr_tail(source: AsyncIterator[Any], lines: deque[str]) -> As
 def _capture_stderr(options: ClaudeSdkOptions) -> tuple[ClaudeSdkOptions, deque[str]]:
     """Install the shared bounded stderr collector used by run and stream."""
     lines: deque[str] = deque(maxlen=_STDERR_TAIL_LINES)
+    upstream = options.stderr
 
     def stderr(line: str) -> None:
         clean = line.rstrip()
         lines.append(clean)
+        if upstream is not None:
+            upstream(clean)
         _log_cli_stderr(clean)
 
     return replace(options, stderr=stderr), lines

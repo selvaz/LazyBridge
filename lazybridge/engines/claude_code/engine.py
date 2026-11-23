@@ -9,7 +9,9 @@ import random
 import time
 import uuid
 import warnings
+from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypeVar, get_origin
 
@@ -523,7 +525,10 @@ class ClaudeCodeEngine:
                 yield item
 
     async def _call_with_retries(
-        self, make_call: Callable[[], Awaitable[_T]], tool_clock: ToolClock | None = None
+        self,
+        make_call: Callable[[], Awaitable[_T]],
+        tool_clock: ToolClock | None = None,
+        stderr_lines: deque[str] | None = None,
     ) -> _T:
         """Run ``make_call()`` under ``request_timeout``, retrying transient failures.
 
@@ -559,14 +564,20 @@ class ClaudeCodeEngine:
 
         if self.request_timeout is None:
             return await _attempt_loop()
+        started = tool_clock.now() if tool_clock is not None else time.monotonic()
         try:
             return await wait_with_tool_clock(_attempt_loop(), self.request_timeout, tool_clock)
         except TimeoutError as exc:
-            raise TimeoutError(
+            now = tool_clock.now() if tool_clock is not None else time.monotonic()
+            remaining = max(0.0, self.request_timeout - (now - started))
+            message = (
                 "Claude Code timeout: phase=request budget (initialization or processing); "
-                f"configured request_timeout={self.request_timeout}s; remaining budget=0s; "
-                "CLI stderr tail unavailable"
-            ) from exc
+                f"configured request_timeout={self.request_timeout}s; remaining budget={remaining:.3f}s"
+            )
+            if stderr_lines:
+                stderr_tail = "\n".join(stderr_lines)
+                message += f"; CLI stderr tail:\n{stderr_tail}"
+            raise TimeoutError(message) from exc
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
@@ -689,8 +700,16 @@ class ClaudeCodeEngine:
                     gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
                     tool_clock=tool_clock,
                 )
+                stderr_lines: deque[str] = deque(maxlen=20)
+
+                def capture_stderr(line: str) -> None:
+                    stderr_lines.append(line.rstrip())
+
+                options = replace(options, stderr=capture_stderr)
                 result = await self._call_with_retries(
-                    lambda: self._client.run(prompt, options=options, attachments=attachments), tool_clock
+                    lambda: self._client.run(prompt, options=options, attachments=attachments),
+                    tool_clock,
+                    stderr_lines,
                 )
                 if self.persist_session and result.session_id:
                     # Inside the lock too: the next queued run must see it.

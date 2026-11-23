@@ -60,6 +60,8 @@ async def test_tool_error_releases_clock_and_runtime_stall_times_out(stream):
             response = await options.mcp_tools[0].handler({"symbol": "AMZN"})
             assert response["isError"]
             assert not options.tool_clock.active
+            assert options.stderr is not None
+            options.stderr("runtime stalled after tool failure")
             await asyncio.sleep(10)
 
     sdk = StallingSdk()
@@ -74,7 +76,9 @@ async def test_tool_error_releases_clock_and_runtime_stall_times_out(stream):
         result = await agent.run("fail")
         assert not result.ok
         assert result.error.type == "TimeoutError"
-        assert result.error.message == ""
+        assert "phase=request budget" in result.error.message
+        assert "runtime stalled after tool failure" in result.error.message
+        assert "stderr tail unavailable" not in result.error.message
     assert not sdk.options[-1].tool_clock.active
 
 
