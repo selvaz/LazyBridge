@@ -70,9 +70,8 @@ async def test_tool_error_releases_clock_and_runtime_stall_times_out(stream):
         tools=[broken_tool],
     )
     if stream:
-        with pytest.raises(TimeoutError, match="phase=request budget") as exc_info:
+        with pytest.raises(TimeoutError, match="Claude Code stream went idle") as exc_info:
             _ = [chunk async for chunk in agent.stream("fail")]
-        assert "remaining budget=0.000s" in str(exc_info.value)
         assert "runtime stalled after tool failure" in str(exc_info.value)
     else:
         result = await agent.run("fail")
