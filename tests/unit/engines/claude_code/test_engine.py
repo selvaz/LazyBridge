@@ -125,6 +125,21 @@ def test_stderr_wrapped_initialize_timeout_remains_transient():
     assert _is_transient(error)
 
 
+@pytest.mark.asyncio
+async def test_stderr_enrichment_preserves_stream_exception_type():
+    from collections import deque
+
+    from lazybridge.engines.claude_code.sdk_client import _with_stderr_tail
+
+    async def failing_stream():
+        raise TimeoutError("stream timed out")
+        yield  # pragma: no cover
+
+    with pytest.raises(TimeoutError, match="stream timed out") as exc_info:
+        _ = [item async for item in _with_stderr_tail(failing_stream(), deque(["cli detail"]))]
+    assert "cli detail" in str(exc_info.value)
+
+
 @pytest.mark.parametrize("value", [0, -1])
 def test_initialize_timeout_must_be_positive(value):
     with pytest.raises(ValueError, match="initialize_timeout"):

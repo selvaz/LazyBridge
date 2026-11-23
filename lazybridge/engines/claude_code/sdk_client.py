@@ -335,9 +335,8 @@ def _error_with_stderr(exc: Exception, lines: deque[str]) -> Exception:
     """Attach the bounded CLI stderr tail without hiding the original cause."""
     if not lines:
         return exc
-    wrapped = RuntimeError(_stderr_detail(str(exc), lines))
-    wrapped.__cause__ = exc
-    return wrapped
+    exc.args = (_stderr_detail(str(exc), lines),)
+    return exc
 
 
 async def _with_stderr_tail(source: AsyncIterator[Any], lines: deque[str]) -> AsyncIterator[Any]:
@@ -347,7 +346,8 @@ async def _with_stderr_tail(source: AsyncIterator[Any], lines: deque[str]) -> As
             async for message in messages:
                 yield message
     except Exception as exc:
-        raise _error_with_stderr(exc, lines) from exc
+        _error_with_stderr(exc, lines)
+        raise
 
 
 def _capture_stderr(options: ClaudeSdkOptions) -> tuple[ClaudeSdkOptions, deque[str]]:
