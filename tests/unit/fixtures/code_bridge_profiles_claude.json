@@ -1,0 +1,42 @@
+{
+  "policy_version": 1,
+  "policy_revision": "2026-11-23.1",
+  "policy_digest": "ca97cfadd99045388ab8733dcf3df7a871011764be6182ff22b1b91b2f577198",
+  "eligible": false,
+  "ineligibility_reasons": [
+    "The launcher and workspace restrictions have not been verified.",
+    "No scoped shell commands are specified in the grant.",
+    "Network route restrictions are not enforced by these settings."
+  ],
+  "launch_args": [
+    "--setting-sources",
+    "",
+    "--strict-mcp-config"
+  ],
+  "settings": {
+    "permissions": {
+      "allow": [
+        "Edit",
+        "Glob",
+        "Grep",
+        "MultiEdit",
+        "NotebookEdit",
+        "Read",
+        "WebFetch",
+        "WebSearch",
+        "Write",
+        "mcp__approved__lookup"
+      ],
+      "deny": [
+        "Bash"
+      ]
+    }
+  },
+  "mcp_config": {
+    "mcpServers": {
+      "approved": {
+        "command": "approved-server"
+      }
+    }
+  }
+}

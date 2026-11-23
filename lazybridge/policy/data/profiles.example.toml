@@ -1,0 +1,11 @@
+version = 1
+revision = "2026-11-23.1"
+
+[profiles.read]
+allowed_tool_classes = ["read"]
+
+[profiles.edit]
+allowed_tool_classes = ["read", "edit"]
+
+[profiles.edit-and-run]
+allowed_tool_classes = ["read", "edit", "shell"]
