@@ -1,0 +1,35 @@
+{
+  "policy_version": 1,
+  "policy_revision": "2026-11-23.1",
+  "policy_digest": "ca97cfadd99045388ab8733dcf3df7a871011764be6182ff22b1b91b2f577198",
+  "eligible": false,
+  "ineligibility_reasons": [
+    "The launcher has not verified the isolated CODEX_HOME and excluded project configuration.",
+    "Scoped shell commands are not enforced by this configuration.",
+    "MCP server definitions and per-tool restrictions are not enforced by this configuration.",
+    "Network route restrictions are not enforced by this configuration."
+  ],
+  "codex_home_config_toml": "sandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\n[sandbox_workspace_write]\nnetwork_access = true\nwritable_roots = [\"/workspace/example-task\", \"/workspace/example-task/.scratch\"]\n[tools]\nweb_search = true\n[mcp_servers.\"approved\"]\nenabled = true\n[mcp_servers.\"rogue\"]\nenabled = false\n",
+  "config_overrides": {
+    "sandbox_mode": "workspace-write",
+    "approval_policy": "never",
+    "sandbox_workspace_write": {
+      "network_access": true,
+      "writable_roots": [
+        "/workspace/example-task",
+        "/workspace/example-task/.scratch"
+      ]
+    },
+    "tools": {
+      "web_search": true
+    },
+    "mcp_servers": {
+      "approved": {
+        "enabled": true
+      },
+      "rogue": {
+        "enabled": false
+      }
+    }
+  }
+}
