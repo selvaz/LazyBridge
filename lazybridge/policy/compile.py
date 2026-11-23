@@ -26,8 +26,9 @@ def compile_claude(policy: EffectivePolicy) -> dict[str, Any]:
     # No command allowlist exists in the grant schema, so no Bash command is admitted.
     deny.append("Bash")
     (allow if "web" in policy.tools else deny).extend(("WebFetch", "WebSearch"))
-    allow.extend(f"mcp__{name}__{tool}" for name, config in sorted(policy.mcp_servers.items())
-                 for tool in config["tools"])
+    allow.extend(
+        f"mcp__{name}__{tool}" for name, config in sorted(policy.mcp_servers.items()) for tool in config["tools"]
+    )
     reasons = ["The launcher and workspace restrictions have not been verified."]
     if "shell" in policy.tool_classes:
         reasons.append("No scoped shell commands are specified in the grant.")
@@ -65,13 +66,21 @@ def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
         reasons.append("MCP server definitions and per-tool restrictions are not enforced by this configuration.")
     if policy.network_routes:
         reasons.append("Network route restrictions are not enforced by this configuration.")
-    quote = lambda value: json.dumps(value, ensure_ascii=True)
-    lines = [f'sandbox_mode = {quote(overrides["sandbox_mode"])}', 'approval_policy = "never"',
-             "[sandbox_workspace_write]", f'network_access = {str(policy.network == "on").lower()}',
-             f'writable_roots = {quote(overrides["sandbox_workspace_write"]["writable_roots"])}',
-             "[tools]", f'web_search = {str(overrides["tools"]["web_search"]).lower()}']
+
+    def quote(value: object) -> str:
+        return json.dumps(value, ensure_ascii=True)
+
+    lines = [
+        f"sandbox_mode = {quote(overrides['sandbox_mode'])}",
+        'approval_policy = "never"',
+        "[sandbox_workspace_write]",
+        f"network_access = {str(policy.network == 'on').lower()}",
+        f"writable_roots = {quote(overrides['sandbox_workspace_write']['writable_roots'])}",
+        "[tools]",
+        f"web_search = {str(overrides['tools']['web_search']).lower()}",
+    ]
     for name, config in overrides["mcp_servers"].items():
-        lines.extend([f'[mcp_servers.{quote(name)}]', f'enabled = {str(config["enabled"]).lower()}'])
+        lines.extend([f"[mcp_servers.{quote(name)}]", f"enabled = {str(config['enabled']).lower()}"])
     return {
         **_metadata(policy),
         "eligible": False,

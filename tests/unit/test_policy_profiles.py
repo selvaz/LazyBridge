@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import importlib
 import json
 import tomllib
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path, PurePosixPath
 
 import pytest
-
-import importlib
 
 profiles_module = importlib.import_module("lazybridge.policy.resolve")
 
@@ -71,7 +70,9 @@ def test_edit_never_gets_shell(tmp_path: Path, network: str, placement: str) -> 
     assert any("shell denial" in reason for reason in compiled["ineligibility_reasons"])
 
 
-@pytest.mark.parametrize(("profile", "tool"), [("edit", "shell"), ("edit", "Bash"), ("read", "edit"), ("read", "shell")])
+@pytest.mark.parametrize(
+    ("profile", "tool"), [("edit", "shell"), ("edit", "Bash"), ("read", "edit"), ("read", "shell")]
+)
 def test_native_tools_cannot_bypass_profile_ceiling(tmp_path: Path, profile: str, tool: str) -> None:
     with pytest.raises(PolicyError, match="unknown tool grant"):
         resolve(profile, TaskGrant(tmp_path, {"tools": [tool]}, "on", "local"))
@@ -145,8 +146,11 @@ def golden_policy(tmp_path: Path, monkeypatch) -> object:
 
     monkeypatch.setattr(profiles_module, "_digest", portable_digest)
     policy = resolve("edit-and-run", grant(workspace, "on", "cloud"))
-    return replace(policy, folder=PurePosixPath("/workspace/example-task"),
-                   scratch_folder=PurePosixPath("/workspace/example-task/.scratch"))
+    return replace(
+        policy,
+        folder=PurePosixPath("/workspace/example-task"),
+        scratch_folder=PurePosixPath("/workspace/example-task/.scratch"),
+    )
 
 
 @pytest.mark.parametrize("engine", ["claude", "codex"])

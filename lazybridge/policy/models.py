@@ -52,5 +52,3 @@ class EffectivePolicy:
     mcp_servers: Mapping[str, Mapping[str, Any]]
     mcp_inventory: tuple[str, ...]
     digest: str
-
-

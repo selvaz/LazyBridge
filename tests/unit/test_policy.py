@@ -1,33 +1,43 @@
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
-from lazybridge.policy import (PolicyError, PolicyWidening, TaskGrant, child_within_parent,
-                               opposite_engine_reviewer, resolve)
+from lazybridge.policy import (
+    PolicyError,
+    PolicyWidening,
+    TaskGrant,
+    child_within_parent,
+    opposite_engine_reviewer,
+    resolve,
+)
 
 
 def grant(root, **changes):
-    values = {"tool_classes": ["read", "edit", "shell"], "tools": ["web", "mcp"],
-              "network_routes": ["https://example.test"],
-              "mcp_servers": {"server": {"tools": ["read", "write"]}},
-              "mcp_inventory": {"server": {"command": "server", "tools": ["read", "write"]}},
-              "scratch_folder": str(root / ".scratch")}
+    values = {
+        "tool_classes": ["read", "edit", "shell"],
+        "tools": ["web", "mcp"],
+        "network_routes": ["https://example.test"],
+        "mcp_servers": {"server": {"tools": ["read", "write"]}},
+        "mcp_inventory": {"server": {"command": "server", "tools": ["read", "write"]}},
+        "scratch_folder": str(root / ".scratch"),
+    }
     values.update(changes)
     return TaskGrant(root, values, "on", "local")
 
 
-@pytest.mark.parametrize("change,reason", [
-    ({"tool_classes": ["read", "edit", "shell"]}, "tool class"),
-    ({"tools": ["web", "mcp"]}, "tool not granted"),
-    ({"network_routes": ["https://other.test"]}, "network route"),
-    ({"mcp_servers": {"server": {"tools": ["write"]}}}, "MCP server or tool"),
-    ({"mcp_inventory": {"server": {"command": "other", "tools": ["read", "write"]}}}, "MCP server configuration"),
-    ({"mcp_inventory": {}, "mcp_servers": {}}, "MCP inventory"),
-])
+@pytest.mark.parametrize(
+    "change,reason",
+    [
+        ({"tool_classes": ["read", "edit", "shell"]}, "tool class"),
+        ({"tools": ["web", "mcp"]}, "tool not granted"),
+        ({"network_routes": ["https://other.test"]}, "network route"),
+        ({"mcp_servers": {"server": {"tools": ["write"]}}}, "MCP server or tool"),
+        ({"mcp_inventory": {"server": {"command": "other", "tools": ["read", "write"]}}}, "MCP server configuration"),
+        ({"mcp_inventory": {}, "mcp_servers": {}}, "MCP inventory"),
+    ],
+)
 def test_child_refuses_widening(tmp_path, change, reason):
-    parent_grant = grant(tmp_path, tool_classes=["read"], tools=["mcp"],
-                         mcp_servers={"server": {"tools": ["read"]}})
+    parent_grant = grant(tmp_path, tool_classes=["read"], tools=["mcp"], mcp_servers={"server": {"tools": ["read"]}})
     parent = resolve("edit-and-run", parent_grant)
     child_grant = replace(parent_grant, grants={**parent_grant.grants, **change})
     with pytest.raises(PolicyWidening, match=reason):
@@ -42,7 +52,16 @@ def test_paths_network_placement_and_grandchild(tmp_path):
         child_within_parent(parent, grant(tmp_path, scratch_folder=str(tmp_path / "other")))
     with pytest.raises(PolicyWidening, match="placement"):
         child_within_parent(parent, replace(grant(tmp_path), placement="cloud"))
-    offline = TaskGrant(tmp_path, {"tool_classes": ["read"], "scratch_folder": str(tmp_path / ".scratch"), "mcp_inventory": {"server": {"command": "server", "tools": ["read", "write"]}}}, "off", "local")
+    offline = TaskGrant(
+        tmp_path,
+        {
+            "tool_classes": ["read"],
+            "scratch_folder": str(tmp_path / ".scratch"),
+            "mcp_inventory": {"server": {"command": "server", "tools": ["read", "write"]}},
+        },
+        "off",
+        "local",
+    )
     child = child_within_parent(parent, offline)
     with pytest.raises(PolicyWidening, match="network on"):
         child_within_parent(child, replace(offline, network="on"))
@@ -66,6 +85,10 @@ def test_reviewer_is_always_opposite_engine():
 
 def test_digest_is_canonical_for_unordered_grants(tmp_path):
     one = grant(tmp_path, network_routes=["https://b", "https://a"])
-    two = grant(tmp_path, network_routes=["https://a", "https://b"],
-                tool_classes=["shell", "read", "edit"], tools=["mcp", "web"])
+    two = grant(
+        tmp_path,
+        network_routes=["https://a", "https://b"],
+        tool_classes=["shell", "read", "edit"],
+        tools=["mcp", "web"],
+    )
     assert resolve("edit-and-run", one).digest == resolve("edit-and-run", two).digest

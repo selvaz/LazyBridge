@@ -183,10 +183,11 @@ def resolve(profile: str, grant: TaskGrant, document: ProfileDocument | None = N
     )
 
 
-
 def child_within_parent(
-    parent: EffectivePolicy, child_request: TaskGrant,
-    profile: str | None = None, document: ProfileDocument | None = None,
+    parent: EffectivePolicy,
+    child_request: TaskGrant,
+    profile: str | None = None,
+    document: ProfileDocument | None = None,
 ) -> EffectivePolicy:
     """Resolve a child and reject every expansion of the immediate parent."""
     profile = profile or parent.profile
