@@ -54,10 +54,33 @@ def stalled_sdk(monkeypatch):
 def test_sdk_run_raises_idle_timeout(stalled_sdk):
     killed, client = stalled_sdk
     started = time.monotonic()
-    with pytest.raises(TimeoutError, match="went idle"):
+    with pytest.raises(TimeoutError, match=r"ClaudeCodeEngine\(stream_idle_timeout=\.\.\.\)"):
         run_coroutine_blocking(lambda: client.run("test", options=ClaudeSdkOptions(stream_idle_timeout=0.2)))
     assert time.monotonic() - started < 2
     assert killed == [12345]
+
+
+def test_custom_query_without_initialized_sentinel_starts_idle_guard_at_first_message(monkeypatch):
+    class Transport:
+        def __init__(self, **kwargs):
+            self._process = None
+
+        async def close(self):
+            pass
+
+    async def query(prompt, options, transport, initialize_timeout):
+        # A custom factory that omits _INITIALIZED keeps its first yield in the
+        # initialization phase, where the message-idle watchdog is disabled.
+        await asyncio.sleep(0.1)
+        yield object()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(sdk_client, "_CLOSE_GRACE", 0.01)
+    client = sdk_client.AgentSdkClient(transport_factory=Transport, query_factory=query)
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="went idle"):
+        run_coroutine_blocking(lambda: client.run("test", options=ClaudeSdkOptions(stream_idle_timeout=0.05)))
+    assert time.monotonic() - started >= 0.1
 
 
 @pytest.mark.parametrize("idle,request_timeout", [(0.2, 5), (5, 0.2)])

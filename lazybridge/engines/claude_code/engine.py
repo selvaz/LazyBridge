@@ -505,7 +505,7 @@ class ClaudeCodeEngine:
         ``stream_idle_timeout`` is ``None``.
         """
         async with closing_iter(agen) as inner:
-            if self.stream_idle_timeout is None or getattr(self._client, "guards_stream_idle", False):
+            if self.stream_idle_timeout is None or self._client.guards_stream_idle:
                 async for item in inner:
                     yield item
                 return

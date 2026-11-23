@@ -115,6 +115,10 @@ class ClaudeSdkClient(Protocol):
     the prompt's text block; empty for a text-only run.
     """
 
+    # Most clients leave stream-idle enforcement to ClaudeCodeEngine. Clients
+    # that guard their lower-level message stream override this capability.
+    guards_stream_idle: bool = False
+
     async def run(
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> ClaudeSdkResult: ...

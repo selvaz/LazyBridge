@@ -140,6 +140,8 @@ def test_a_third_or_further_weekly_window_is_picked_up_without_a_schema_change()
 # fetch_claude_usage / ClaudeCodeEngine.usage() -- no network, injected client
 # --------------------------------------------------------------------------- #
 class _FakeUsageClient:
+    guards_stream_idle = False
+
     """Stands in for ``AgentSdkClient``: same ``ClaudeSdkClient`` shape."""
 
     def __init__(self, text: str = REAL_REPORT, *, error: Exception | None = None):
@@ -205,6 +207,8 @@ def test_fetch_claude_usage_times_out_rather_than_hanging():
     from lazybridge.engines.claude_code.usage import fetch_claude_usage
 
     class _Hangs:
+        guards_stream_idle = False
+
         async def run(self, prompt, *, options, attachments=()):
             await anyio.sleep(10)
 

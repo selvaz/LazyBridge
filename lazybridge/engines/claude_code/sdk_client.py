@@ -119,7 +119,11 @@ async def _bounded_query(
                     queue.get(), idle_timeout if initialized else None, tool_clock, idle=True
                 )
             except TimeoutError as exc:
-                error = TimeoutError(f"Claude Code stream went idle for {idle_timeout}s without a message")
+                error = TimeoutError(
+                    f"Claude Code stream went idle for {idle_timeout}s without a message "
+                    "(set ClaudeCodeEngine(stream_idle_timeout=...) to a higher value if streams "
+                    "legitimately pause that long)."
+                )
                 error.claude_stream_idle = True  # type: ignore[attr-defined]
                 raise error from exc
             if kind == "end":
@@ -451,7 +455,10 @@ class AgentSdkClient(ClaudeSdkClient):
     LazyBridge and are intentionally not wired here; the engine owns session
     continuity. ``transport_factory`` and ``query_factory`` are the supported
     injection seam for tests and alternate transports, so tests never need to
-    patch SDK internals or launch the real CLI.
+    patch SDK internals or launch the real CLI. A custom ``query_factory`` must
+    yield the adapter's initialization sentinel after initialization; until it
+    yields its first item, the adapter cannot distinguish initialization from
+    message processing and therefore does not apply the idle watchdog.
     """
 
     # The adapter guards the underlying SDK messages, including initialization.
