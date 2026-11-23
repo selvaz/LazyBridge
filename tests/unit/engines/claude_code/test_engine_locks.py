@@ -39,8 +39,6 @@ async def settle(cycles: int = 25) -> None:
 
 
 class GatedSdk:
-    guards_stream_idle = False
-
     """A fake SDK whose turns stay open until the test releases them.
 
     Call ``i`` (0-based, in arrival order) sets ``entered(i)``, optionally

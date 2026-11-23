@@ -140,8 +140,6 @@ def test_a_third_or_further_weekly_window_is_picked_up_without_a_schema_change()
 # fetch_claude_usage / ClaudeCodeEngine.usage() -- no network, injected client
 # --------------------------------------------------------------------------- #
 class _FakeUsageClient:
-    guards_stream_idle = False
-
     """Stands in for ``AgentSdkClient``: same ``ClaudeSdkClient`` shape."""
 
     def __init__(self, text: str = REAL_REPORT, *, error: Exception | None = None):

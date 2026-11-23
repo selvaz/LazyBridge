@@ -472,8 +472,6 @@ def test_standard_tool_provider_is_expanded_before_the_engine_runs():
 
 
 class StructuredSdk:
-    guards_stream_idle = False
-
     """Answers with the CLI's parsed ``structured_output``, not prose."""
 
     def __init__(self):
@@ -757,8 +755,6 @@ def test_unconfinable_extra_tools_require_an_approval_gate(tmp_path):
 
 
 class _AliasSdk:
-    guards_stream_idle = False
-
     """Scriptable fake that reports its session id EARLY, like the real SDK.
 
     ``early`` mimics the init-message report (``options.on_session_id``);
