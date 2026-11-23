@@ -180,6 +180,9 @@ async def run_tool_bounded(tool: Any, arguments: dict[str, Any], timeout: float 
     an async tool, and it is the honest limit: reaching past an override into
     the base dispatch would silently skip what the override is there to do.
     """
+    require_grant = getattr(tool, "require_policy_grant", None)
+    if require_grant is not None:
+        require_grant()
     own = getattr(tool, "timeout", None)
     limit = own if own is not None else timeout
     if limit is None:
@@ -238,6 +241,7 @@ class Tool:
         agent_memory: Any | None = None,
         agent_store: Any | None = None,
         timeout: float | None = None,
+        policy_grant: str | None = None,
     ) -> None:
         if mode not in ("signature", "llm", "hybrid"):
             # ``"auto"`` was the 0.7-era default — removed in 0.7.9.
@@ -258,6 +262,7 @@ class Tool:
         #: ``None`` for no bound.  ``Agent(tool_timeout=...)`` supplies a
         #: default to tools that do not set their own.
         self.timeout = check_timeout(timeout, "Tool(timeout=)")
+        self.policy_grant = policy_grant
         self.schema_llm = schema_llm
         self.strict = strict
         #: When ``True``, ``func`` returns an ``Envelope`` instead of a
@@ -289,6 +294,7 @@ class Tool:
         strict: bool = False,
         returns_envelope: bool = False,
         timeout: float | None = None,
+        policy_grant: str | None = None,
     ) -> Tool:
         """Create a Tool with a pre-built JSON Schema for parameters.
 
@@ -307,6 +313,7 @@ class Tool:
         tool.schema_llm = None
         tool.strict = strict
         tool.timeout = check_timeout(timeout, "Tool.from_schema(timeout=)")
+        tool.policy_grant = policy_grant
         tool.returns_envelope = returns_envelope
         tool.agent_memory = None
         tool.agent_store = None
@@ -346,7 +353,34 @@ class Tool:
         return _validate_and_coerce_arguments(self.func, kwargs)
 
     async def run(self, **kwargs: Any) -> Any:
+        self.require_policy_grant()
         return await self._dispatch(kwargs, self.timeout)
+
+    def require_policy_grant(self) -> None:
+        """Refuse direct calls that bypass policy-filtered discovery."""
+        if self.policy_grant is None:
+            return
+        from lazybridge.policy import PolicyDenied, current_policy_context
+
+        context = current_policy_context()
+        if context is None:
+            return
+        policy = context.effective_policy
+        granted = self.policy_grant in policy.tool_classes or self.policy_grant in policy.tools
+        if not granted:
+            raise PolicyDenied(self.policy_grant)
+
+    def granted_by_active_policy(self) -> bool:
+        """Whether this tool may be advertised in the current invocation."""
+        try:
+            self.require_policy_grant()
+        except Exception as exc:
+            from lazybridge.policy import PolicyDenied
+
+            if isinstance(exc, PolicyDenied):
+                return False
+            raise
+        return True
 
     async def _dispatch(self, kwargs: dict[str, Any], timeout: float | None) -> Any:
         """One invocation under an explicit bound.

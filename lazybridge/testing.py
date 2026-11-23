@@ -190,6 +190,7 @@ class MockAgent:
         default_latency_ms: float | None = None,
         default_model: str = "mock",
         default_provider: str = "mock",
+        policy: Any | None = None,
     ) -> None:
         self._responses = responses
         self._cycle = cycle
@@ -207,6 +208,7 @@ class MockAgent:
         self.verify: Any | None = None
         self.timeout: float | None = None
         self.fallback: Any | None = None
+        self.policy = policy
         self._tools_raw: list[Any] = []
         self._tool_map: dict[str, Any] = {}
 
@@ -225,6 +227,15 @@ class MockAgent:
     # ------------------------------------------------------------------
 
     async def run(self, task: str | Envelope) -> Envelope:
+        return await self._run_as_tool(task)
+
+    async def _run_as_tool(self, task: str | Envelope) -> Envelope:
+        from lazybridge.policy.context import policy_scope
+
+        with policy_scope(self.policy):
+            return await self._run_body(task)
+
+    async def _run_body(self, task: str | Envelope) -> Envelope:
         env_in = self._to_envelope(task)
         start = time.perf_counter()
         if self._delay_ms > 0:
