@@ -62,7 +62,8 @@ def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
     }
     reasons = ["The launcher has not verified the isolated CODEX_HOME and excluded project configuration."]
     if "shell" not in policy.tool_classes:
-        reasons.append("Codex shell denial is not enforced by this configuration.")
+        overrides["features"] = {"shell_tool": False}
+        reasons.append("Codex shell denial has not been verified for the target runtime.")
     else:
         reasons.append("Scoped shell commands are not enforced by this configuration.")
     if policy.mcp_servers:
@@ -81,6 +82,8 @@ def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
         f"network_access = {str(policy.network == 'on').lower()}",
         f"writable_roots = {quote(overrides['sandbox_workspace_write']['writable_roots'])}",
     ]
+    if "features" in overrides:
+        lines.extend(["[features]", "shell_tool = false"])
     for name, config in overrides["mcp_servers"].items():
         lines.extend([f"[mcp_servers.{quote(name)}]", f"enabled = {str(config['enabled']).lower()}"])
     return {

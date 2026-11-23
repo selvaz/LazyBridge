@@ -68,6 +68,14 @@ def test_edit_never_gets_shell(tmp_path: Path, network: str, placement: str) -> 
     compiled = compile_codex(policy)
     assert not compiled["eligible"]
     assert any("shell denial" in reason for reason in compiled["ineligibility_reasons"])
+    assert compiled["config_overrides"]["features"] == {"shell_tool": False}
+    assert tomllib.loads(compiled["codex_home_config_toml"])["features"] == {"shell_tool": False}
+
+
+def test_shell_grant_does_not_force_enable_codex_shell(tmp_path: Path) -> None:
+    compiled = compile_codex(resolve("edit-and-run", grant(tmp_path)))
+    assert "features" not in compiled["config_overrides"]
+    assert any("Scoped shell" in reason for reason in compiled["ineligibility_reasons"])
 
 
 @pytest.mark.parametrize(
