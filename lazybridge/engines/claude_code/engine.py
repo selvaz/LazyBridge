@@ -132,6 +132,9 @@ class ClaudeCodeEngine:
     count toward ``request_timeout`` or ``stream_idle_timeout``. Overlapping
     tool calls pause the request budget once; the idle window restarts after
     the last tool finishes. Native Claude tools still count as runtime time.
+    The effective CLI initialization wait is ``min(initialize_timeout,
+    remaining request_timeout budget)``. For cold starts, raise
+    ``request_timeout`` together with ``initialize_timeout``.
 
     **Durable sessions.** ``persist_session=True`` keeps the Claude Code
     session and exposes :attr:`session_id`; ``ClaudeCodeEngine(session_id=...)``
@@ -176,7 +179,7 @@ class ClaudeCodeEngine:
         session_id: str | None = None,
         persist_session: bool = False,
         request_timeout: float | None = 120.0,
-        initialize_timeout: float = 180.0,
+        initialize_timeout: float = 120.0,
         stream_idle_timeout: float | None = 90.0,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -537,7 +540,9 @@ class ClaudeCodeEngine:
         the deadline actually enforced. Initialization attempts, retry
         backoff, and request processing all spend from this same budget. If
         ``initialize_timeout`` exceeds the remaining request budget, the
-        outer request deadline wins.
+        outer request deadline wins. The effective initialize wait is
+        ``min(initialize_timeout, remaining request budget)``; raise
+        ``request_timeout`` as well as ``initialize_timeout`` for cold starts.
         """
 
         async def _attempt_loop() -> _T:
@@ -554,7 +559,14 @@ class ClaudeCodeEngine:
 
         if self.request_timeout is None:
             return await _attempt_loop()
-        return await wait_with_tool_clock(_attempt_loop(), self.request_timeout, tool_clock)
+        try:
+            return await wait_with_tool_clock(_attempt_loop(), self.request_timeout, tool_clock)
+        except TimeoutError as exc:
+            raise TimeoutError(
+                "Claude Code timeout: phase=request budget (initialization or processing); "
+                f"configured request_timeout={self.request_timeout}s; remaining budget=0s; "
+                "CLI stderr tail unavailable"
+            ) from exc
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""

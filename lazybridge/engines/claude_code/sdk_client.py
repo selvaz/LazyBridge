@@ -17,7 +17,7 @@ import subprocess
 import tempfile
 import warnings
 from collections import deque
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -78,17 +78,24 @@ async def _bounded_query(
     initialize_timeout: float,
     idle_timeout: float | None,
     tool_clock: ToolClock | None = None,
+    transport_factory: Callable[..., Any] | None = None,
+    query_factory: Callable[[Any, Any, Any, float], AsyncIterator[Any]] | None = None,
 ) -> AsyncIterator[Any]:
     """Consume the SDK independently so cancellation cannot pin the caller in SDK close."""
-    from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+    if transport_factory is None:
+        from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+
+        transport_factory = SubprocessCLITransport
+    if query_factory is None:
+        query_factory = _query_with_explicit_initialize_timeout
 
     # query() normally constructs this itself. Supplying it explicitly lets us
     # retain the child handle even when cancellation is stuck in query.close().
     transport_options = sdk_options
     if getattr(sdk_options, "can_use_tool", None):
         transport_options = replace(sdk_options, permission_prompt_tool_name="stdio")
-    transport = SubprocessCLITransport(prompt=prompt, options=transport_options)
-    messages = _query_with_explicit_initialize_timeout(prompt, sdk_options, transport, initialize_timeout)
+    transport = transport_factory(prompt=prompt, options=transport_options)
+    messages = query_factory(prompt, sdk_options, transport, initialize_timeout)
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 
     async def consume() -> None:
@@ -224,13 +231,13 @@ async def _query_with_explicit_initialize_timeout(
         await query.start()
         await query.initialize()
         if isinstance(prompt, str):
-            message = {
+            user_message = {
                 "type": "user",
                 "session_id": "",
                 "message": {"role": "user", "content": prompt},
                 "parent_tool_use_id": None,
             }
-            await transport.write(json.dumps(message) + "\n")
+            await transport.write(json.dumps(user_message) + "\n")
             query.spawn_task(query.wait_for_result_and_end_input())
         else:
             query.spawn_task(query.stream_input(prompt))
@@ -426,7 +433,22 @@ class AgentSdkClient(ClaudeSdkClient):
 
     The SDK uses the same local Claude Code authentication as the CLI.  No
     credential is passed to, read by, or persisted by this adapter.
+
+    The SDK's ``session_store`` and resume handling are not used by
+    LazyBridge and are intentionally not wired here; the engine owns session
+    continuity. ``transport_factory`` and ``query_factory`` are the supported
+    injection seam for tests and alternate transports, so tests never need to
+    patch SDK internals or launch the real CLI.
     """
+
+    def __init__(
+        self,
+        *,
+        transport_factory: Callable[..., Any] | None = None,
+        query_factory: Callable[[Any, Any, Any, float], AsyncIterator[Any]] | None = None,
+    ) -> None:
+        self._transport_factory = transport_factory
+        self._query_factory = query_factory
 
     @staticmethod
     def _message_model(message: Any, current: str | None) -> str | None:
@@ -814,6 +836,8 @@ class AgentSdkClient(ClaudeSdkClient):
                         options.initialize_timeout,
                         options.stream_idle_timeout,
                         options.tool_clock,
+                        self._transport_factory,
+                        self._query_factory,
                     ),
                     stderr_lines,
                 )
@@ -898,6 +922,8 @@ class AgentSdkClient(ClaudeSdkClient):
                         stream_options.initialize_timeout,
                         stream_options.stream_idle_timeout,
                         stream_options.tool_clock,
+                        self._transport_factory,
+                        self._query_factory,
                     ),
                     stderr_lines,
                 )

@@ -50,7 +50,7 @@ class ClaudeSdkOptions:
     include_partial_messages: bool = False
     stream_idle_timeout: float | None = None
     #: Maximum time allowed for the CLI control-protocol initialize request.
-    initialize_timeout: float = 180.0
+    initialize_timeout: float = 120.0
     #: Internal per-call stderr sink installed by ``AgentSdkClient``.
     stderr: Callable[[str], None] | None = None
     tool_clock: ToolClock | None = None

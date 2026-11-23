@@ -10,7 +10,7 @@ Plan. Tools and application state remain LazyBridge objects.
 Use Python 3.11 or later and install the extra:
 
 ```sh
-python -m pip install "lazybridge[claude-code]==1.8.12"
+python -m pip install "lazybridge[claude-code]==1.8.13"
 claude doctor
 ```
 
@@ -95,8 +95,8 @@ print(desk("Explain the demonstration quote for EXAMPLE.").text())
 | `tag` | `"lazybridge"` | Best-effort SDK tag on a newly created durable session; None disables. |
 | `config` | default CodingAgentConfig | Native policy plus shared approval gate. |
 | `approval_gate` | `None` | Direct gate override; a different gate in config conflicts. |
-| `request_timeout` | `120.0` | Shared processing budget across retries; CLI initialization uses its separate allowance. None disables. |
-| `initialize_timeout` | `180.0` | Per-attempt CLI initialize limit. Initialization is separate from the shared `request_timeout` processing budget. |
+| `request_timeout` | `120.0` | Hard shared processing budget across initialization, retries, backoff, and request processing. None disables. |
+| `initialize_timeout` | `120.0` | Per-attempt CLI initialize limit. The effective wait is `min(initialize_timeout, remaining request budget)`. Raise `request_timeout` too for cold starts. |
 | `stream_idle_timeout` | `90.0` | Maximum idle gap during streaming; None disables. |
 | `max_retries`, `retry_delay` | `3`, `1.0` | Transient retry budget and exponential-backoff base with jitter. |
 | `tool_timeout` | `None` | Per-application-tool deadline. |

@@ -543,7 +543,7 @@ def test_an_early_aclose_of_stream_closes_the_sdk_query_before_returning(monkeyp
 
     closed = asyncio.Event()
 
-    async def query(*, prompt, options, transport):
+    async def query(prompt, options, transport, initialize_timeout):
         try:
             yield StreamEvent({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}})
             await asyncio.Event().wait()  # parked, as a live query would be
@@ -557,15 +557,30 @@ def test_an_early_aclose_of_stream_closes_the_sdk_query_before_returning(monkeyp
     module.SystemMessage = SystemMessage
     module.ResultMessage = ResultMessage
     module.StreamEvent = StreamEvent
-    module.query = query
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", module)
     monkeypatch.setattr(AgentSdkClient, "_sdk_options", staticmethod(lambda options: options))
-    from claude_agent_sdk._internal.transport import subprocess_cli
 
-    monkeypatch.setattr(subprocess_cli, "SubprocessCLITransport", lambda **kwargs: object())
+    class Transport:
+        _process = None
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def connect(self):
+            pass
+
+        async def read_messages(self):
+            if False:
+                yield {}
+
+        async def write(self, data):
+            pass
+
+        async def close(self):
+            pass
 
     async def scenario() -> None:
-        turn = AgentSdkClient().stream("go", options=ClaudeSdkOptions())
+        turn = AgentSdkClient(transport_factory=Transport, query_factory=query).stream("go", options=ClaudeSdkOptions())
         event = await turn.__anext__()
         assert event.text == "hi"
         assert not closed.is_set()
@@ -703,22 +718,39 @@ class TestLongSystemPrompt:
     def test_run_passes_the_file_and_cleans_up_even_when_the_query_fails(self, monkeypatch):
         import os
 
-        import claude_agent_sdk
-
         from lazybridge.engines.claude_code.sdk_client import SYSTEM_PROMPT_FILE_THRESHOLD
 
         seen: dict[str, object] = {}
 
-        async def failing_query(*, prompt, options, transport):
+        async def failing_query(prompt, options, transport, initialize_timeout):
             seen["system_prompt"] = options.system_prompt
             seen["existed"] = os.path.exists(options.system_prompt["path"])
             raise RuntimeError("boom")
             yield  # pragma: no cover - makes this an async generator
 
-        monkeypatch.setattr(claude_agent_sdk, "query", failing_query)
+        class Transport:
+            _process = None
+
+            def __init__(self, **kwargs):
+                pass
+
+            async def connect(self):
+                pass
+
+            async def read_messages(self):
+                if False:
+                    yield {}
+
+            async def write(self, data):
+                pass
+
+            async def close(self):
+                pass
+
         options = ClaudeSdkOptions(model="sonnet", system_prompt="x" * (SYSTEM_PROMPT_FILE_THRESHOLD + 1))
         with pytest.raises(RuntimeError, match="boom"):
-            asyncio.run(AgentSdkClient().run("hi", options=options))
+            client = AgentSdkClient(transport_factory=Transport, query_factory=failing_query)
+            asyncio.run(client.run("hi", options=options))
         assert seen["existed"] is True
         assert seen["system_prompt"]["type"] == "file"
         assert not os.path.exists(seen["system_prompt"]["path"])
