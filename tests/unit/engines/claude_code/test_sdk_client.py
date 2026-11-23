@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
+import os
 
 import pytest
 
+from lazybridge import Agent
 from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.claude_code.mcp_adapter import to_mcp_tools
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
@@ -430,6 +433,67 @@ def test_no_window_means_no_environment_of_our_own():
     assert AgentSdkClient._sdk_options(ClaudeSdkOptions()).env == {}
 
 
+def test_initialize_timeout_reaches_real_sdk_query_without_parent_environment(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "parent-value")
+    from lazybridge.engines.claude_code.sdk_client import _build_explicit_timeout_query
+
+    sdk_options = AgentSdkClient._sdk_options(ClaudeSdkOptions(initialize_timeout=2.5))
+    query = _build_explicit_timeout_query(object(), sdk_options, 2.5)
+
+    assert query._initialize_timeout == 2.5
+    assert "CLAUDE_CODE_STREAM_CLOSE_TIMEOUT" not in sdk_options.env
+    assert os.environ["CLAUDE_CODE_STREAM_CLOSE_TIMEOUT"] == "parent-value"
+
+
+@pytest.mark.asyncio
+async def test_stream_initialize_timeout_includes_stderr_tail():
+    class SilentTransport:
+        def __init__(self, *, prompt, options):
+            self.options = options
+            self.requests = []
+            self.closed = False
+
+        async def connect(self):
+            self.options.stderr("initialize subprocess diagnostic")
+
+        async def write(self, data):
+            self.requests.append(json.loads(data))
+
+        async def read_messages(self):
+            await asyncio.Event().wait()
+            yield  # pragma: no cover
+
+        async def close(self):
+            self.closed = True
+
+    transports = []
+
+    def transport_factory(**kwargs):
+        transport = SilentTransport(**kwargs)
+        transports.append(transport)
+        return transport
+
+    agent = Agent(
+        ClaudeCodeEngine(
+            client=AgentSdkClient(transport_factory=transport_factory),
+            request_timeout=0.01,
+            initialize_timeout=0.03,
+            stream_idle_timeout=1,
+            max_retries=0,
+        )
+    )
+
+    with pytest.raises(Exception, match="Control request timeout: initialize") as exc_info:
+        _ = [chunk async for chunk in agent.stream("initialize")]
+
+    message = str(exc_info.value)
+    assert "Control request timeout: initialize" in message
+    assert "Claude CLI stderr" in message
+    assert "initialize subprocess diagnostic" in message
+    assert transports[0].requests[0]["request"]["subtype"] == "initialize"
+    assert transports[0].closed
+
+
 def test_the_policy_reaches_the_options_the_engine_builds():
     """The field is useless if the engine does not carry it across."""
     from lazybridge.engines.claude_code import ClaudeCodeEngine
@@ -530,7 +594,7 @@ def test_an_early_aclose_of_stream_closes_the_sdk_query_before_returning(monkeyp
 
     closed = asyncio.Event()
 
-    async def query(*, prompt, options, transport):
+    async def query(prompt, options, transport, initialize_timeout):
         try:
             yield StreamEvent({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}})
             await asyncio.Event().wait()  # parked, as a live query would be
@@ -544,15 +608,30 @@ def test_an_early_aclose_of_stream_closes_the_sdk_query_before_returning(monkeyp
     module.SystemMessage = SystemMessage
     module.ResultMessage = ResultMessage
     module.StreamEvent = StreamEvent
-    module.query = query
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", module)
     monkeypatch.setattr(AgentSdkClient, "_sdk_options", staticmethod(lambda options: options))
-    from claude_agent_sdk._internal.transport import subprocess_cli
 
-    monkeypatch.setattr(subprocess_cli, "SubprocessCLITransport", lambda **kwargs: object())
+    class Transport:
+        _process = None
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def connect(self):
+            pass
+
+        async def read_messages(self):
+            if False:
+                yield {}
+
+        async def write(self, data):
+            pass
+
+        async def close(self):
+            pass
 
     async def scenario() -> None:
-        turn = AgentSdkClient().stream("go", options=ClaudeSdkOptions())
+        turn = AgentSdkClient(transport_factory=Transport, query_factory=query).stream("go", options=ClaudeSdkOptions())
         event = await turn.__anext__()
         assert event.text == "hi"
         assert not closed.is_set()
@@ -690,22 +769,39 @@ class TestLongSystemPrompt:
     def test_run_passes_the_file_and_cleans_up_even_when_the_query_fails(self, monkeypatch):
         import os
 
-        import claude_agent_sdk
-
         from lazybridge.engines.claude_code.sdk_client import SYSTEM_PROMPT_FILE_THRESHOLD
 
         seen: dict[str, object] = {}
 
-        async def failing_query(*, prompt, options, transport):
+        async def failing_query(prompt, options, transport, initialize_timeout):
             seen["system_prompt"] = options.system_prompt
             seen["existed"] = os.path.exists(options.system_prompt["path"])
             raise RuntimeError("boom")
             yield  # pragma: no cover - makes this an async generator
 
-        monkeypatch.setattr(claude_agent_sdk, "query", failing_query)
+        class Transport:
+            _process = None
+
+            def __init__(self, **kwargs):
+                pass
+
+            async def connect(self):
+                pass
+
+            async def read_messages(self):
+                if False:
+                    yield {}
+
+            async def write(self, data):
+                pass
+
+            async def close(self):
+                pass
+
         options = ClaudeSdkOptions(model="sonnet", system_prompt="x" * (SYSTEM_PROMPT_FILE_THRESHOLD + 1))
         with pytest.raises(RuntimeError, match="boom"):
-            asyncio.run(AgentSdkClient().run("hi", options=options))
+            client = AgentSdkClient(transport_factory=Transport, query_factory=failing_query)
+            asyncio.run(client.run("hi", options=options))
         assert seen["existed"] is True
         assert seen["system_prompt"]["type"] == "file"
         assert not os.path.exists(seen["system_prompt"]["path"])

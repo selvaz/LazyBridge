@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from lazybridge.engines._tool_clock import ToolClock
 from lazybridge.engines.coding import ApprovalGate
@@ -49,6 +49,10 @@ class ClaudeSdkOptions:
     mcp_tools: tuple[McpTool, ...] = ()
     include_partial_messages: bool = False
     stream_idle_timeout: float | None = None
+    #: Maximum time allowed for the CLI control-protocol initialize request.
+    initialize_timeout: float = 120.0
+    #: Internal per-call stderr sink installed by ``AgentSdkClient``.
+    stderr: Callable[[str], None] | None = None
     tool_clock: ToolClock | None = None
     #: Native structured output, in the Messages API shape the Agent SDK
     #: expects: ``{"type": "json_schema", "schema": {...}}``. The SDK turns
@@ -123,3 +127,10 @@ class ClaudeSdkClient(Protocol):
     def stream(
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> AsyncIterator[ClaudeSdkStreamEvent]: ...
+
+
+@runtime_checkable
+class StreamIdleGuard(Protocol):
+    """Optional capability for clients that enforce their own idle timeout."""
+
+    guards_stream_idle: bool

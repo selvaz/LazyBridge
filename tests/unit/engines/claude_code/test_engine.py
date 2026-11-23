@@ -9,6 +9,7 @@ from lazybridge import Agent, Envelope, Memory, Session, Tool
 from lazybridge.core.types import AudioContent, ImageContent
 from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent
+from lazybridge.engines.claude_code.sdk_client import AgentSdkClient
 from lazybridge.engines.coding import ApprovalDecision, ApprovalRequest, ask_approval
 from lazybridge.session import EventType
 
@@ -72,6 +73,79 @@ class FakeSdk:
         yield ClaudeSdkStreamEvent(session_id="fake-stream-session", final=True)
 
 
+def test_initialize_timeout_is_first_class_option():
+    sdk = FakeSdk()
+    engine = ClaudeCodeEngine(client=sdk, initialize_timeout=245)
+
+    Agent(engine=engine, name="timeout-option", tools=[get_quote])("quote")
+
+    assert engine.initialize_timeout == 245
+    assert sdk.options[0].initialize_timeout == 245
+
+
+def test_initialize_control_timeout_spends_request_budget():
+    class InitializingSdk(AgentSdkClient):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        async def run(self, prompt, *, options, attachments=()):
+            self.calls += 1
+            if self.calls == 1:
+                await asyncio.sleep(0.03)
+                raise Exception("Control request timeout: initialize")
+            return ClaudeSdkResult(text="ready")
+
+    sdk = InitializingSdk()
+    result = Agent(
+        engine=ClaudeCodeEngine(
+            client=sdk,
+            request_timeout=0.01,
+            initialize_timeout=0.05,
+            max_retries=1,
+            retry_delay=0.001,
+        ),
+        name="initialize-retry",
+    )("go")
+
+    assert not result.ok
+    assert result.error is not None
+    assert "timeout" in result.error.message.lower()
+    assert sdk.calls == 1
+
+
+def test_stderr_wrapped_initialize_timeout_remains_transient():
+    from collections import deque
+
+    from lazybridge.engines.claude_code.engine import _is_transient
+    from lazybridge.engines.claude_code.sdk_client import _error_with_stderr
+
+    error = _error_with_stderr(Exception("Control request timeout: initialize"), deque(["cli detail"]))
+
+    assert _is_transient(error)
+
+
+@pytest.mark.asyncio
+async def test_stderr_enrichment_preserves_stream_exception_type():
+    from collections import deque
+
+    from lazybridge.engines.claude_code.sdk_client import _with_stderr_tail
+
+    async def failing_stream():
+        raise TimeoutError("stream timed out")
+        yield  # pragma: no cover
+
+    with pytest.raises(TimeoutError, match="stream timed out") as exc_info:
+        _ = [item async for item in _with_stderr_tail(failing_stream(), deque(["cli detail"]))]
+    assert "cli detail" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_initialize_timeout_must_be_positive(value):
+    with pytest.raises(ValueError, match="initialize_timeout"):
+        ClaudeCodeEngine(initialize_timeout=value)
+
+
 def get_quote(symbol: str) -> dict[str, str]:
     """Return a deterministic quote lookup."""
     return {"symbol": symbol}
@@ -106,6 +180,21 @@ def test_stream_model_response_uses_final_sdk_model():
     assert event["model"] == "claude-sonnet-5"
     assert event["requested_model"] == "sonnet"
     assert event["model_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_custom_client_without_idle_capability_uses_engine_guard():
+    class Client:
+        async def stream(self, prompt, *, options, attachments=()):
+            yield ClaudeSdkStreamEvent(text="ready")
+            if prompt == "stall":
+                await asyncio.Event().wait()
+            yield ClaudeSdkStreamEvent(final=True)
+
+    agent = Agent(ClaudeCodeEngine(client=Client(), stream_idle_timeout=0.05, max_retries=0))
+    assert "".join([chunk async for chunk in agent.stream("normal")]) == "ready"
+    with pytest.raises(TimeoutError, match="stream went idle"):
+        _ = [chunk async for chunk in agent.stream("stall")]
 
 
 def test_cache_tokens_reach_model_response_and_metadata_blocking_and_stream():

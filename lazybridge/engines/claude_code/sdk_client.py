@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.metadata
+import inspect
 import json
 import logging
 import os
 import subprocess
 import tempfile
 import warnings
-from collections.abc import AsyncIterator, Iterator
+from collections import deque
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, get_args
 
@@ -39,6 +42,7 @@ SYSTEM_PROMPT_FILE_THRESHOLD = 8_000
 
 _CLOSE_GRACE = 0.5
 _KILL_TIMEOUT = 10.0
+_INITIALIZED = object()
 
 
 def _kill_tree(process: Any) -> None:
@@ -70,19 +74,30 @@ def _kill_tree(process: Any) -> None:
 
 
 async def _bounded_query(
-    prompt: Any, sdk_options: Any, idle_timeout: float | None, tool_clock: ToolClock | None = None
+    prompt: Any,
+    sdk_options: Any,
+    initialize_timeout: float,
+    idle_timeout: float | None,
+    tool_clock: ToolClock | None = None,
+    transport_factory: Callable[..., Any] | None = None,
+    query_factory: Callable[[Any, Any, Any, float], AsyncIterator[Any]] | None = None,
+    close_grace: float = _CLOSE_GRACE,
 ) -> AsyncIterator[Any]:
     """Consume the SDK independently so cancellation cannot pin the caller in SDK close."""
-    from claude_agent_sdk import query
-    from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+    if transport_factory is None:
+        from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+
+        transport_factory = SubprocessCLITransport
+    if query_factory is None:
+        query_factory = _query_with_explicit_initialize_timeout
 
     # query() normally constructs this itself. Supplying it explicitly lets us
     # retain the child handle even when cancellation is stuck in query.close().
     transport_options = sdk_options
     if getattr(sdk_options, "can_use_tool", None):
         transport_options = replace(sdk_options, permission_prompt_tool_name="stdio")
-    transport = SubprocessCLITransport(prompt=prompt, options=transport_options)
-    messages = query(prompt=prompt, options=sdk_options, transport=transport)
+    transport = transport_factory(prompt=prompt, options=transport_options)
+    messages = query_factory(prompt, sdk_options, transport, initialize_timeout)
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 
     async def consume() -> None:
@@ -97,16 +112,28 @@ async def _bounded_query(
             await queue.put(("end", None))
 
     task = asyncio.create_task(consume())
+    initialized = False
     try:
         while True:
             try:
-                kind, value = await wait_with_tool_clock(queue.get(), idle_timeout, tool_clock, idle=True)
+                kind, value = await wait_with_tool_clock(
+                    queue.get(), idle_timeout if initialized else None, tool_clock, idle=True
+                )
             except TimeoutError as exc:
-                raise TimeoutError(f"Claude Code stream went idle for {idle_timeout}s without a message") from exc
+                error = TimeoutError(
+                    f"Claude Code stream went idle for {idle_timeout}s without a message "
+                    "(set ClaudeCodeEngine(stream_idle_timeout=...) to a higher value if streams "
+                    "legitimately pause that long)."
+                )
+                error.claude_stream_idle = True  # type: ignore[attr-defined]
+                raise error from exc
             if kind == "end":
                 return
             if kind == "error":
                 raise value
+            initialized = True
+            if value is _INITIALIZED:
+                continue
             yield value
     finally:
         if not task.done():
@@ -114,7 +141,7 @@ async def _bounded_query(
             # overall request_timeout firing while an idle-timeout cleanup is
             # in its grace period) must not stop the kill or leave the consumer
             # unregistered. If we are cancelled while waiting, kill immediately.
-            cleanup = asyncio.ensure_future(_cleanup_consumer(task, transport))
+            cleanup = asyncio.ensure_future(_cleanup_consumer(task, transport, close_grace))
             _cleanup_tasks.add(cleanup)
             cleanup.add_done_callback(_cleanup_tasks.discard)
             try:
@@ -129,6 +156,113 @@ async def _bounded_query(
         if task.done():
             with contextlib.suppress(BaseException):
                 task.result()
+
+
+def _build_explicit_timeout_query(transport: Any, options: Any, initialize_timeout: float) -> Any:
+    """Build the SDK's protocol query with an explicit initialize deadline.
+
+    claude-agent-sdk 0.2.x has no public timeout argument. Its public
+    ``query()`` reads the parent environment before constructing this class,
+    so putting the variable in ``ClaudeAgentOptions.env`` affects only the CLI
+    child. Keep the necessary private integration isolated here and fail
+    clearly if a future SDK changes the constructor contract.
+    """
+    version = importlib.metadata.version("claude-agent-sdk")
+    from claude_agent_sdk._internal.query import Query
+
+    required = {
+        "transport",
+        "is_streaming_mode",
+        "can_use_tool",
+        "hooks",
+        "sdk_mcp_servers",
+        "initialize_timeout",
+        "agents",
+        "exclude_dynamic_sections",
+        "skills",
+    }
+    if not version.startswith("0.2.") or not required <= set(inspect.signature(Query).parameters):
+        raise RuntimeError(
+            f"claude-agent-sdk {version} is incompatible with LazyBridge's explicit initialize-timeout adapter"
+        )
+
+    hooks = None
+    if options.hooks:
+        hooks = {
+            event: [
+                {
+                    "matcher": getattr(matcher, "matcher", None),
+                    "hooks": getattr(matcher, "hooks", []),
+                    **({"timeout": matcher.timeout} if getattr(matcher, "timeout", None) is not None else {}),
+                }
+                for matcher in matchers
+            ]
+            for event, matchers in options.hooks.items()
+        }
+    sdk_mcp_servers = {
+        name: config["instance"]
+        for name, config in (options.mcp_servers or {}).items()
+        if isinstance(config, dict) and config.get("type") == "sdk"
+    }
+    agents = (
+        {
+            name: {key: value for key, value in asdict(agent).items() if value is not None}
+            for name, agent in options.agents.items()
+        }
+        if options.agents
+        else None
+    )
+    system_prompt = options.system_prompt
+    exclude_dynamic_sections = (
+        system_prompt.get("exclude_dynamic_sections")
+        if isinstance(system_prompt, dict)
+        and system_prompt.get("type") == "preset"
+        and isinstance(system_prompt.get("exclude_dynamic_sections"), bool)
+        else None
+    )
+    return Query(
+        transport=transport,
+        is_streaming_mode=True,
+        can_use_tool=options.can_use_tool,
+        hooks=hooks,
+        sdk_mcp_servers=sdk_mcp_servers,
+        initialize_timeout=initialize_timeout,
+        agents=agents,
+        exclude_dynamic_sections=exclude_dynamic_sections,
+        skills=options.skills,
+    )
+
+
+async def _query_with_explicit_initialize_timeout(
+    prompt: Any, options: Any, transport: Any, initialize_timeout: float
+) -> AsyncIterator[Any]:
+    """Run the SDK protocol query while owning its private Query lifecycle."""
+    from claude_agent_sdk._internal.message_parser import parse_message
+
+    await transport.connect()
+    query = _build_explicit_timeout_query(transport, options, initialize_timeout)
+    try:
+        await query.start()
+        await query.initialize()
+        yield _INITIALIZED
+        if isinstance(prompt, str):
+            user_message = {
+                "type": "user",
+                "session_id": "",
+                "message": {"role": "user", "content": prompt},
+                "parent_tool_use_id": None,
+            }
+            await transport.write(json.dumps(user_message) + "\n")
+            query.spawn_task(query.wait_for_result_and_end_input())
+        else:
+            query.spawn_task(query.stream_input(prompt))
+        async for data in query.receive_messages():
+            message = parse_message(data)
+            if message is not None:
+                yield message
+    finally:
+        await query.close()
+        query.close_receive_stream()
 
 
 #: Strong references to in-flight cleanup tasks (``abandoned_tasks`` is weak).
@@ -152,16 +286,16 @@ def _detach(task: asyncio.Task[Any]) -> None:
     task.add_done_callback(_retrieve_exception)
 
 
-async def _cleanup_consumer(task: asyncio.Task[Any], transport: Any) -> None:
+async def _cleanup_consumer(task: asyncio.Task[Any], transport: Any, close_grace: float) -> None:
     """Cancel the consumer, kill the CLI if it does not stop, then detach it."""
     process = getattr(transport, "_process", None)
     task.cancel()
-    done, _ = await asyncio.wait({task}, timeout=_CLOSE_GRACE)
+    done, _ = await asyncio.wait({task}, timeout=close_grace)
     process = process or getattr(transport, "_process", None)
     if process is not None and getattr(process, "returncode", None) is None:
         await asyncio.to_thread(_kill_tree, process)
     if not done:
-        done, _ = await asyncio.wait({task}, timeout=_CLOSE_GRACE)
+        done, _ = await asyncio.wait({task}, timeout=close_grace)
     if not done:
         _detach(task)
 
@@ -199,7 +333,51 @@ def _log_cli_stderr(line: str) -> None:
     to actually see why the CLI died, at the cost of these lines going
     through Python logging instead of straight to the console.
     """
-    logger.warning("claude CLI stderr: %s", line.rstrip())
+    logger.debug("claude CLI stderr: %s", line.rstrip())
+
+
+_STDERR_TAIL_LINES = 20
+
+
+def _stderr_detail(message: str, lines: deque[str]) -> str:
+    if not lines:
+        return message
+    logger.warning("Claude CLI stderr tail on failure:\n%s", "\n".join(lines))
+    return f"{message}\nClaude CLI stderr (last {len(lines)} lines):\n" + "\n".join(lines)
+
+
+def _error_with_stderr(exc: Exception, lines: deque[str]) -> Exception:
+    """Attach the bounded CLI stderr tail without hiding the original cause."""
+    if not lines:
+        return exc
+    exc.args = (_stderr_detail(str(exc), lines),)
+    return exc
+
+
+async def _with_stderr_tail(source: AsyncIterator[Any], lines: deque[str]) -> AsyncIterator[Any]:
+    """Preserve iterator cleanup while enriching any SDK/transport failure."""
+    try:
+        async with closing_iter(source) as messages:
+            async for message in messages:
+                yield message
+    except Exception as exc:
+        _error_with_stderr(exc, lines)
+        raise
+
+
+def _capture_stderr(options: ClaudeSdkOptions) -> tuple[ClaudeSdkOptions, deque[str]]:
+    """Install the shared bounded stderr collector used by run and stream."""
+    lines: deque[str] = deque(maxlen=_STDERR_TAIL_LINES)
+    upstream = options.stderr
+
+    def stderr(line: str) -> None:
+        clean = line.rstrip()
+        lines.append(clean)
+        if upstream is not None:
+            upstream(clean)
+        _log_cli_stderr(clean)
+
+    return replace(options, stderr=stderr), lines
 
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -273,7 +451,30 @@ class AgentSdkClient(ClaudeSdkClient):
 
     The SDK uses the same local Claude Code authentication as the CLI.  No
     credential is passed to, read by, or persisted by this adapter.
+
+    The SDK's ``session_store`` and resume handling are not used by
+    LazyBridge and are intentionally not wired here; the engine owns session
+    continuity. ``transport_factory`` and ``query_factory`` are the supported
+    injection seam for tests and alternate transports, so tests never need to
+    patch SDK internals or launch the real CLI. A custom ``query_factory`` must
+    yield the adapter's initialization sentinel after initialization; until it
+    yields its first item, the adapter cannot distinguish initialization from
+    message processing and therefore does not apply the idle watchdog.
     """
+
+    # The adapter guards the underlying SDK messages, including initialization.
+    guards_stream_idle = True
+
+    def __init__(
+        self,
+        *,
+        transport_factory: Callable[..., Any] | None = None,
+        query_factory: Callable[[Any, Any, Any, float], AsyncIterator[Any]] | None = None,
+        close_grace: float = _CLOSE_GRACE,
+    ) -> None:
+        self._transport_factory = transport_factory
+        self._query_factory = query_factory
+        self._close_grace = close_grace
 
     @staticmethod
     def _message_model(message: Any, current: str | None) -> str | None:
@@ -619,18 +820,20 @@ class AgentSdkClient(ClaudeSdkClient):
             # rather than a plain ``str`` (dict key types are invariant, so a
             # pre-built ``dict[str, ...]`` would not satisfy the parameter).
             hooks=sdk_hooks,
-            stderr=_log_cli_stderr,
+            stderr=options.stderr or _log_cli_stderr,
             setting_sources=list(options.setting_sources),
             # The env var, not the settings file: it takes precedence over
             # every settings source, so it says the same thing whether or not
             # this agent was told to read the user's settings. The SDK merges
             # this dict OVER the inherited environment rather than replacing
             # it, so naming one variable does not strip the rest.
-            env=(
-                {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(options.auto_compact_window)}
-                if options.auto_compact_window is not None
-                else {}
-            ),
+            env={
+                **(
+                    {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(options.auto_compact_window)}
+                    if options.auto_compact_window is not None
+                    else {}
+                ),
+            },
             include_partial_messages=options.include_partial_messages,
             output_format=options.output_format,
         )
@@ -643,6 +846,7 @@ class AgentSdkClient(ClaudeSdkClient):
         except ImportError as exc:  # pragma: no cover
             raise ImportError("Claude Agent SDK is not installed") from exc
 
+        options, stderr_lines = _capture_stderr(options)
         final: Any | None = None
         model: str | None = None
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
@@ -651,7 +855,19 @@ class AgentSdkClient(ClaudeSdkClient):
         with _system_prompt_via_file(options) as cli_options:
             sdk_options = self._sdk_options(cli_options)
             async with closing_iter(
-                _bounded_query(sdk_prompt, sdk_options, options.stream_idle_timeout, options.tool_clock)
+                _with_stderr_tail(
+                    _bounded_query(
+                        sdk_prompt,
+                        sdk_options,
+                        options.initialize_timeout,
+                        options.stream_idle_timeout,
+                        options.tool_clock,
+                        self._transport_factory,
+                        self._query_factory,
+                        self._close_grace,
+                    ),
+                    stderr_lines,
+                )
             ) as messages:
                 async for message in messages:
                     self._report_session_id(options, message)
@@ -664,7 +880,9 @@ class AgentSdkClient(ClaudeSdkClient):
         if final.is_error:
             detail = "; ".join(final.errors or []) or final.result or final.subtype
             raise ClaudeSdkRequestError(
-                f"Claude Agent SDK failed: {detail}", status=final.api_error_status, session_id=final.session_id
+                _stderr_detail(f"Claude Agent SDK failed: {detail}", stderr_lines),
+                status=final.api_error_status,
+                session_id=final.session_id,
             )
 
         usage = final.usage or {}
@@ -712,6 +930,7 @@ class AgentSdkClient(ClaudeSdkClient):
         except ImportError as exc:  # pragma: no cover
             raise ImportError("Claude Agent SDK is not installed") from exc
 
+        options, stderr_lines = _capture_stderr(options)
         saw_text = False
         saw_result = False
         model: str | None = None
@@ -723,11 +942,18 @@ class AgentSdkClient(ClaudeSdkClient):
         )
         with _system_prompt_via_file(stream_options) as cli_options:
             async with closing_iter(
-                _bounded_query(
-                    sdk_prompt,
-                    self._sdk_options(cli_options),
-                    stream_options.stream_idle_timeout,
-                    stream_options.tool_clock,
+                _with_stderr_tail(
+                    _bounded_query(
+                        sdk_prompt,
+                        self._sdk_options(cli_options),
+                        stream_options.initialize_timeout,
+                        stream_options.stream_idle_timeout,
+                        stream_options.tool_clock,
+                        self._transport_factory,
+                        self._query_factory,
+                        self._close_grace,
+                    ),
+                    stderr_lines,
                 )
             ) as messages:
                 async for message in messages:
@@ -746,7 +972,7 @@ class AgentSdkClient(ClaudeSdkClient):
                         if message.is_error:
                             detail = "; ".join(message.errors or []) or message.result or message.subtype
                             raise ClaudeSdkRequestError(
-                                f"Claude Agent SDK failed: {detail}",
+                                _stderr_detail(f"Claude Agent SDK failed: {detail}", stderr_lines),
                                 status=message.api_error_status,
                                 session_id=message.session_id,
                             )

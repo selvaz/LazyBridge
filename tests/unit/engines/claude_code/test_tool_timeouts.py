@@ -60,6 +60,8 @@ async def test_tool_error_releases_clock_and_runtime_stall_times_out(stream):
             response = await options.mcp_tools[0].handler({"symbol": "AMZN"})
             assert response["isError"]
             assert not options.tool_clock.active
+            if options.stderr is not None:
+                options.stderr("runtime stalled after tool failure")
             await asyncio.sleep(10)
 
     sdk = StallingSdk()
@@ -74,8 +76,26 @@ async def test_tool_error_releases_clock_and_runtime_stall_times_out(stream):
         result = await agent.run("fail")
         assert not result.ok
         assert result.error.type == "TimeoutError"
-        assert result.error.message == ""
+        assert "phase=request budget" in result.error.message
+        assert "runtime stalled after tool failure" in result.error.message
+        assert "stderr tail unavailable" not in result.error.message
     assert not sdk.options[-1].tool_clock.active
+
+
+@pytest.mark.asyncio
+async def test_stream_can_outlive_request_timeout_while_producing_output():
+    class LongStreamSdk(FakeSdk):
+        async def stream(self, prompt, *, options, attachments=()):
+            for text in ("a", "b", "c", "d"):
+                await asyncio.sleep(0.03)
+                yield ClaudeSdkStreamEvent(text=text)
+            yield ClaudeSdkStreamEvent(final=True)
+
+    agent = Agent(
+        engine=ClaudeCodeEngine(client=LongStreamSdk(), request_timeout=0.05, stream_idle_timeout=0.1, max_retries=0)
+    )
+
+    assert "".join([chunk async for chunk in agent.stream("long")]) == "abcd"
 
 
 @pytest.mark.parametrize("stream", [False, True])

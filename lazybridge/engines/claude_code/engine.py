@@ -9,7 +9,9 @@ import random
 import time
 import uuid
 import warnings
+from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypeVar, get_origin
 
@@ -29,7 +31,7 @@ from lazybridge.model_tiers import translate_model
 from lazybridge.session import EventType
 
 from .mcp_adapter import to_mcp_tools
-from .protocol import ClaudeSdkClient, ClaudeSdkOptions
+from .protocol import ClaudeSdkClient, ClaudeSdkOptions, StreamIdleGuard
 from .sdk_client import AgentSdkClient, ClaudeSdkRequestError
 
 _logger = logging.getLogger(__name__)
@@ -65,9 +67,19 @@ _TRANSIENT_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 #: match on, so match the SDK-authored prefix instead. A fresh retry (no
 #: ``resume``) reruns the same turn and reliably succeeds in practice.
 _SDK_RESULT_RACE_PREFIX = "Claude Code returned an error result:"
+_SDK_INITIALIZE_TIMEOUT = "Control request timeout: initialize"
+
+
+def _guards_stream_idle(client: ClaudeSdkClient) -> bool:
+    """Default to the engine's idle guard for clients without the capability."""
+    return isinstance(client, StreamIdleGuard) and client.guards_stream_idle
 
 
 def _is_transient(exc: BaseException) -> bool:
+    if exc.__cause__ is not None and exc.__cause__ is not exc:
+        return _is_transient(exc.__cause__)
+    if _SDK_INITIALIZE_TIMEOUT in str(exc):
+        return True
     if isinstance(exc, ClaudeSdkRequestError):
         return exc.status in _TRANSIENT_HTTP_STATUS
     if isinstance(exc, _NON_TRANSIENT_OS_TYPES):
@@ -127,6 +139,10 @@ class ClaudeCodeEngine:
     count toward ``request_timeout`` or ``stream_idle_timeout``. Overlapping
     tool calls pause the request budget once; the idle window restarts after
     the last tool finishes. Native Claude tools still count as runtime time.
+    Buffered ``run`` calls have a hard ``request_timeout`` across
+    initialization, retries, and processing. Streaming calls deliberately do
+    not: only their initialization is bounded by ``initialize_timeout`` and
+    subsequent stalls by ``stream_idle_timeout``.
 
     **Durable sessions.** ``persist_session=True`` keeps the Claude Code
     session and exposes :attr:`session_id`; ``ClaudeCodeEngine(session_id=...)``
@@ -171,6 +187,7 @@ class ClaudeCodeEngine:
         session_id: str | None = None,
         persist_session: bool = False,
         request_timeout: float | None = 120.0,
+        initialize_timeout: float = 120.0,
         stream_idle_timeout: float | None = 90.0,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -192,6 +209,9 @@ class ClaudeCodeEngine:
         if request_timeout is not None and request_timeout <= 0:
             raise ValueError(f"request_timeout must be > 0 or None, got {request_timeout!r}")
         self.request_timeout = request_timeout
+        if initialize_timeout <= 0:
+            raise ValueError(f"initialize_timeout must be > 0, got {initialize_timeout!r}")
+        self.initialize_timeout = initialize_timeout
         if stream_idle_timeout is not None and stream_idle_timeout <= 0:
             raise ValueError(f"stream_idle_timeout must be > 0 or None, got {stream_idle_timeout!r}")
         self.stream_idle_timeout = stream_idle_timeout
@@ -490,7 +510,7 @@ class ClaudeCodeEngine:
         ``stream_idle_timeout`` is ``None``.
         """
         async with closing_iter(agen) as inner:
-            if self.stream_idle_timeout is None:
+            if self.stream_idle_timeout is None or _guards_stream_idle(self._client):
                 async for item in inner:
                     yield item
                 return
@@ -511,7 +531,10 @@ class ClaudeCodeEngine:
                 yield item
 
     async def _call_with_retries(
-        self, make_call: Callable[[], Awaitable[_T]], tool_clock: ToolClock | None = None
+        self,
+        make_call: Callable[[], Awaitable[_T]],
+        tool_clock: ToolClock | None = None,
+        stderr_lines: deque[str] | None = None,
     ) -> _T:
         """Run ``make_call()`` under ``request_timeout``, retrying transient failures.
 
@@ -521,11 +544,16 @@ class ClaudeCodeEngine:
         with exponential backoff and jitter, at the coarse whole-call
         granularity available here (see ``_is_transient``).
 
-        ``request_timeout`` bounds the *entire* retry loop, not each
-        individual attempt — resetting the deadline per attempt would let
+        ``request_timeout`` is the processing budget for the *entire* retry
+        loop, not each individual attempt — resetting the deadline per attempt would let
         ``max_retries`` stalled attempts plus backoff block for a multiple
         of the advertised timeout (e.g. ~4x with the defaults) instead of
-        the deadline actually enforced.
+        the deadline actually enforced. Initialization attempts, retry
+        backoff, and request processing all spend from this same budget. If
+        ``initialize_timeout`` exceeds the remaining request budget, the
+        outer request deadline wins. The effective initialize wait is
+        ``min(initialize_timeout, remaining request budget)``; raise
+        ``request_timeout`` as well as ``initialize_timeout`` for cold starts.
         """
 
         async def _attempt_loop() -> _T:
@@ -542,7 +570,35 @@ class ClaudeCodeEngine:
 
         if self.request_timeout is None:
             return await _attempt_loop()
-        return await wait_with_tool_clock(_attempt_loop(), self.request_timeout, tool_clock)
+        started = tool_clock.now() if tool_clock is not None else time.monotonic()
+        try:
+            return await wait_with_tool_clock(_attempt_loop(), self.request_timeout, tool_clock)
+        except TimeoutError as exc:
+            if getattr(exc, "claude_stream_idle", False):
+                raise
+            now = tool_clock.now() if tool_clock is not None else time.monotonic()
+            remaining = max(0.0, self.request_timeout - (now - started))
+            raise self._request_timeout_error(remaining, stderr_lines) from exc
+
+    def _request_timeout_error(self, remaining: float, stderr_lines: deque[str] | None) -> TimeoutError:
+        """Build a buffered-run request-budget failure."""
+        message = (
+            "Claude Code timeout: phase=request budget (initialization or processing); "
+            f"configured request_timeout={self.request_timeout}s; remaining budget={remaining:.3f}s"
+        )
+        if stderr_lines:
+            stderr_tail = "\n".join(stderr_lines)
+            message += f"; CLI stderr tail:\n{stderr_tail}"
+        return TimeoutError(message)
+
+    def _capture_stderr(self, options: ClaudeSdkOptions) -> tuple[ClaudeSdkOptions, deque[str]]:
+        """Attach a bounded stderr tail for buffered request timeouts."""
+        stderr_lines: deque[str] = deque(maxlen=20)
+
+        def capture_stderr(line: str) -> None:
+            stderr_lines.append(line.rstrip())
+
+        return replace(options, stderr=capture_stderr), stderr_lines
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
@@ -611,6 +667,7 @@ class ClaudeCodeEngine:
             tool_observer=observe,
             include_partial_messages=partial,
             stream_idle_timeout=self.stream_idle_timeout,
+            initialize_timeout=self.initialize_timeout,
             tool_clock=tool_clock,
             output_format=_output_format(output_type),
             on_session_id=self._learn_session if self._alias is not None else None,
@@ -664,8 +721,11 @@ class ClaudeCodeEngine:
                     gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
                     tool_clock=tool_clock,
                 )
+                options, stderr_lines = self._capture_stderr(options)
                 result = await self._call_with_retries(
-                    lambda: self._client.run(prompt, options=options, attachments=attachments), tool_clock
+                    lambda: self._client.run(prompt, options=options, attachments=attachments),
+                    tool_clock,
+                    stderr_lines,
                 )
                 if self.persist_session and result.session_id:
                     # Inside the lock too: the next queued run must see it.
@@ -810,6 +870,15 @@ class ClaudeCodeEngine:
             cost_usd = 0.0
             resolved_model = None
             tool_clock = ToolClock()
+            options = self._options(
+                tools,
+                observe if session else None,
+                output_type=output_type,
+                partial=True,
+                resume=self._resume_id(session, agent_name),
+                gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
+                tool_clock=tool_clock,
+            )
             async with closing_iter(
                 self._idle_guarded_stream(
                     self._client.stream(
@@ -817,19 +886,11 @@ class ClaudeCodeEngine:
                             env,
                             None if ((self.session_mode == "runtime" and session) or self._resuming) else memory,
                         ),
-                        options=self._options(
-                            tools,
-                            observe if session else None,
-                            output_type=output_type,
-                            partial=True,
-                            resume=self._resume_id(session, agent_name),
-                            gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
-                            tool_clock=tool_clock,
-                        ),
+                        options=options,
                         attachments=self._attachments(env),
                     ),
                     tool_clock,
-                )
+                ),
             ) as events:
                 async for event in events:
                     if event.text:
