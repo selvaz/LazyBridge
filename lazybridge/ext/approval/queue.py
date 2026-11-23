@@ -59,15 +59,16 @@ import asyncio
 import contextlib
 import hashlib
 import inspect
+import json
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from lazybridge import Store
@@ -88,6 +89,72 @@ TicketKind = Literal["approval", "escalation"]
 #: silently treating it the same as a human refusal (which it provably was
 #: not, and deserves a different repair).
 TicketStatus = Literal["pending", "approved", "rejected", "expired"]
+ApprovalVerdict = Literal["approved", "rejected"]
+
+
+class ApprovalTarget(BaseModel):
+    """Stable identity of the object on which an approved action operates."""
+
+    repo: str | None = None
+    ref: str | None = None
+    sha: str | None = None
+    path: str | None = None
+
+
+class TypedApprovalRequest(BaseModel):
+    """Canonical, task-bound request used for governed effects."""
+
+    task_id: str
+    attempt: int
+    action: str
+    target: ApprovalTarget
+    requested_by: str
+    policy_revision: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    digest: str
+
+    @classmethod
+    def create(cls, **values: Any) -> TypedApprovalRequest:
+        """Build a request and populate its canonical digest."""
+        provisional = cls.model_validate({**values, "digest": ""})
+        return provisional.model_copy(update={"digest": provisional.canonical_digest()})
+
+    def canonical_digest(self) -> str:
+        body = self.model_dump(mode="json", exclude={"digest"})
+        encoded = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+class ApprovalDecision(BaseModel):
+    decider: str
+    decided_at: datetime
+    verdict: ApprovalVerdict
+    reason: str | None = None
+
+
+class ApprovalEffectOutcome(BaseModel):
+    executor: str
+    recorded_at: datetime
+    succeeded: bool
+    detail: str | None = None
+
+
+class ApproverContext(BaseModel):
+    """Authenticated identity supplied by the approval transport."""
+
+    actor: str
+
+
+class ExecutorContext(BaseModel):
+    """Authenticated identity and bindings supplied immediately before effect."""
+
+    actor: str
+    task_id: str
+    attempt: int
+    digest: str
+    policy_revision: str
+    target: ApprovalTarget
+
 
 #: Default key prefix when a caller doesn't need multiple independent
 #: queues sharing one Store. Pass ``prefix=`` to :class:`ApprovalQueue`
@@ -171,10 +238,35 @@ class ApprovalTicket(BaseModel):
     #: ran. Set by compare-and-swap, so two attempts racing to claim the
     #: same approval cannot both win.
     consumed_at: datetime | None = None
+    #: Typed fields are absent on historical prompt-only tickets. Such
+    #: tickets remain readable, but cannot authorize a governed effect.
+    request: TypedApprovalRequest | None = None
+    decision: ApprovalDecision | None = None
+    effect_outcome: ApprovalEffectOutcome | None = None
+
+    @property
+    def legacy(self) -> bool:
+        return self.request is None
 
 
 def _hash_prompt(prompt: str) -> str:
     return hashlib.sha256(prompt.encode()).hexdigest()
+
+
+_SECRET_KEY = re.compile(r"(?i)(?:password|passwd|secret|token|api[_-]?key|authorization|credential)")
+
+
+def redact_approval_payload(value: Any, *, key: str = "") -> Any:
+    """Return a JSON-like copy with values under secret-named keys masked."""
+    if key and _SECRET_KEY.search(key):
+        return "[redacted]"
+    if isinstance(value, Mapping):
+        return {str(k): redact_approval_payload(v, key=str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact_approval_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return [redact_approval_payload(item) for item in value]
+    return value
 
 
 #: The tool/command name inside a TieredGate-rendered prompt's first line
@@ -471,15 +563,150 @@ class ApprovalQueue:
         prefix: str = DEFAULT_PREFIX,
         denial_prefix: str = DEFAULT_DENIAL_PREFIX,
         notify_failure_prefix: str = DEFAULT_NOTIFY_FAILURE_PREFIX,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
         self._prefix = prefix
         self._denial_prefix = denial_prefix
         self._notify_failure_prefix = notify_failure_prefix
+        self._clock = clock or (lambda: datetime.now(UTC))
         # Resolved ONCE, here -- see _anchor_db_path's own docstring for
         # why re-resolving per-call/per-thread is unsafe. Every operation
         # below (reads AND writes) routes through this same anchor.
         self._resolved_db_path = _anchor_db_path(store)
+
+    def _now(self) -> datetime:
+        now = self._clock()
+        if now.tzinfo is None:
+            raise ValueError("approval clock must return a timezone-aware datetime")
+        return now
+
+    def create_typed_ticket(
+        self,
+        request: TypedApprovalRequest,
+        *,
+        prompt: str = "",
+        kind: TicketKind = "approval",
+        ttl: timedelta = DEFAULT_TTL,
+        operator_only: bool = False,
+    ) -> ApprovalTicket:
+        """Create a governed ticket after verifying its canonical digest.
+
+        The request is accepted as a model or model-compatible mapping. Its
+        payload is redacted before persistence; the digest continues to bind
+        the original request supplied by the caller.
+        """
+        request = TypedApprovalRequest.model_validate(request)
+        if request.attempt < 1:
+            raise ValueError("attempt must be positive")
+        if request.digest != request.canonical_digest():
+            raise ValueError("request digest does not match canonical request")
+        if ttl <= timedelta(0):
+            raise ValueError(f"ttl must be positive, got {ttl}")
+        now = self._now()
+        stored_request = request.model_copy(update={"payload": redact_approval_payload(request.payload)})
+        ticket = ApprovalTicket(
+            approval_id=str(uuid.uuid4()),
+            task_id=request.task_id,
+            prompt=prompt,
+            prompt_hash=_hash_prompt(prompt),
+            status="pending",
+            kind=kind,
+            operator_only=operator_only,
+            created_at=now,
+            expires_at=now + ttl,
+            request=stored_request,
+        )
+        with self._anchored() as anchored:
+            anchored.write(self._key(ticket.approval_id), ticket.model_dump(mode="json"))
+        return ticket
+
+    def decide_typed_ticket(
+        self,
+        approval_id: str,
+        *,
+        approver: ApproverContext,
+        verdict: ApprovalVerdict,
+        actor: str | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        """Atomically decide a typed ticket once using authenticated identity."""
+        approver = ApproverContext.model_validate(approver)
+        if actor is not None and actor != approver.actor:
+            return False
+        key = self._key(approval_id)
+        with self._anchored() as anchored:
+            raw = anchored.read(key)
+            if not isinstance(raw, dict):
+                return False
+            ticket = ApprovalTicket.model_validate(raw)
+            now = self._now()
+            if ticket.legacy or ticket.status != "pending" or ticket.decision is not None or ticket.expires_at <= now:
+                return False
+            decision = ApprovalDecision(decider=approver.actor, decided_at=now, verdict=verdict, reason=reason)
+            updated = ticket.model_copy(
+                update={"status": verdict, "actor": approver.actor, "reason": reason, "decision": decision}
+            )
+            return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
+
+    def consume_typed_ticket(self, approval_id: str, *, executor: ExecutorContext) -> bool:
+        """Atomically consume an approval bound to its task, attempt and digest."""
+        executor = ExecutorContext.model_validate(executor)
+        key = self._key(approval_id)
+        with self._anchored() as anchored:
+            raw = anchored.read(key)
+            if not isinstance(raw, dict):
+                return False
+            ticket = ApprovalTicket.model_validate(raw)
+            request = ticket.request
+            now = self._now()
+            if (
+                request is None
+                or ticket.status != "approved"
+                or ticket.decision is None
+                or ticket.decision.verdict != "approved"
+                or ticket.consumed_at is not None
+                or ticket.expires_at <= now
+                or request.requested_by != executor.actor
+                or request.task_id != executor.task_id
+                or request.attempt != executor.attempt
+                or request.digest != executor.digest
+                or request.policy_revision != executor.policy_revision
+                or request.target != executor.target
+            ):
+                return False
+            updated = ticket.model_copy(update={"consumed_at": now})
+            return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
+
+    def record_effect_outcome(
+        self, approval_id: str, *, executor: ExecutorContext, succeeded: bool, detail: str | None = None
+    ) -> bool:
+        """Record the effect result once, only for the executor that consumed it."""
+        executor = ExecutorContext.model_validate(executor)
+        key = self._key(approval_id)
+        with self._anchored() as anchored:
+            raw = anchored.read(key)
+            if not isinstance(raw, dict):
+                return False
+            ticket = ApprovalTicket.model_validate(raw)
+            request = ticket.request
+            if (
+                request is None
+                or ticket.consumed_at is None
+                or ticket.effect_outcome is not None
+                or request.requested_by != executor.actor
+                or request.task_id != executor.task_id
+                or request.attempt != executor.attempt
+                or request.digest != executor.digest
+                or request.policy_revision != executor.policy_revision
+                or request.target != executor.target
+            ):
+                return False
+            outcome = ApprovalEffectOutcome(
+                executor=executor.actor, recorded_at=self._now(), succeeded=succeeded, detail=detail
+            )
+            updated = ticket.model_copy(update={"effect_outcome": outcome})
+            return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
 
     def _key(self, approval_id: str) -> str:
         return f"{self._prefix}{approval_id}"
@@ -589,8 +816,8 @@ class ApprovalQueue:
             raw = anchored.read(key)
             if not isinstance(raw, dict):
                 return False
-            ticket = _actionable(raw, datetime.now(UTC))
-            if ticket is None:
+            ticket = _actionable(raw, self._now())
+            if ticket is None or ticket.request is not None:
                 return False
             updated = ticket.model_copy(update={"status": "approved", "actor": actor, "channel": channel})
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
@@ -601,8 +828,8 @@ class ApprovalQueue:
             raw = anchored.read(key)
             if not isinstance(raw, dict):
                 return False
-            ticket = _actionable(raw, datetime.now(UTC))
-            if ticket is None:
+            ticket = _actionable(raw, self._now())
+            if ticket is None or ticket.request is not None:
                 return False
             updated = ticket.model_copy(
                 update={"status": "rejected", "actor": actor, "channel": channel, "reason": reason}
@@ -716,6 +943,8 @@ class ApprovalQueue:
             for key, raw in items:
                 if not isinstance(raw, dict) or raw.get("status") != "approved":
                     continue
+                if raw.get("request") is not None:
+                    continue
                 # A record written before `consumed_at` existed (any
                 # ticket created by a pre-1.7.0 ApprovalQueue) has no
                 # "consumed_at" KEY at all -- `raw.get("consumed_at")`
@@ -786,6 +1015,8 @@ class ApprovalQueue:
             if not isinstance(raw, dict) or raw.get("status") != "approved" or raw.get("consumed_at"):
                 return False
             ticket = ApprovalTicket.model_validate(raw)
+            if ticket.request is not None:
+                return False
             updated = ticket.model_copy(update={"consumed_at": moment})
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
 
