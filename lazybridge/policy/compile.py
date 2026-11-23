@@ -53,16 +53,17 @@ def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
     overrides: dict[str, Any] = {
         "sandbox_mode": "workspace-write" if writable else "read-only",
         "approval_policy": "never",
+        "web_search": "live" if policy.network == "on" and "web" in policy.tools else "disabled",
         "sandbox_workspace_write": {
             "network_access": policy.network == "on",
             "writable_roots": [str(policy.folder), str(policy.scratch_folder)] if writable else [],
         },
-        "tools": {"web_search": policy.network == "on" and "web" in policy.tools},
         "mcp_servers": {name: {"enabled": name in policy.mcp_servers} for name in policy.mcp_inventory},
     }
     reasons = ["The launcher has not verified the isolated CODEX_HOME and excluded project configuration."]
     if "shell" not in policy.tool_classes:
-        reasons.append("Codex shell denial is not enforced by this configuration.")
+        overrides["features"] = {"shell_tool": False}
+        reasons.append("Codex shell denial has not been verified for the target runtime.")
     else:
         reasons.append("Scoped shell commands are not enforced by this configuration.")
     if policy.mcp_servers:
@@ -76,12 +77,13 @@ def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
     lines = [
         f"sandbox_mode = {quote(overrides['sandbox_mode'])}",
         'approval_policy = "never"',
+        f"web_search = {quote(overrides['web_search'])}",
         "[sandbox_workspace_write]",
         f"network_access = {str(policy.network == 'on').lower()}",
         f"writable_roots = {quote(overrides['sandbox_workspace_write']['writable_roots'])}",
-        "[tools]",
-        f"web_search = {str(overrides['tools']['web_search']).lower()}",
     ]
+    if "features" in overrides:
+        lines.extend(["[features]", "shell_tool = false"])
     for name, config in overrides["mcp_servers"].items():
         lines.extend([f"[mcp_servers.{quote(name)}]", f"enabled = {str(config['enabled']).lower()}"])
     return {
