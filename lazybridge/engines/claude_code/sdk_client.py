@@ -81,6 +81,7 @@ async def _bounded_query(
     tool_clock: ToolClock | None = None,
     transport_factory: Callable[..., Any] | None = None,
     query_factory: Callable[[Any, Any, Any, float], AsyncIterator[Any]] | None = None,
+    close_grace: float = _CLOSE_GRACE,
 ) -> AsyncIterator[Any]:
     """Consume the SDK independently so cancellation cannot pin the caller in SDK close."""
     if transport_factory is None:
@@ -140,7 +141,7 @@ async def _bounded_query(
             # overall request_timeout firing while an idle-timeout cleanup is
             # in its grace period) must not stop the kill or leave the consumer
             # unregistered. If we are cancelled while waiting, kill immediately.
-            cleanup = asyncio.ensure_future(_cleanup_consumer(task, transport))
+            cleanup = asyncio.ensure_future(_cleanup_consumer(task, transport, close_grace))
             _cleanup_tasks.add(cleanup)
             cleanup.add_done_callback(_cleanup_tasks.discard)
             try:
@@ -285,16 +286,16 @@ def _detach(task: asyncio.Task[Any]) -> None:
     task.add_done_callback(_retrieve_exception)
 
 
-async def _cleanup_consumer(task: asyncio.Task[Any], transport: Any) -> None:
+async def _cleanup_consumer(task: asyncio.Task[Any], transport: Any, close_grace: float) -> None:
     """Cancel the consumer, kill the CLI if it does not stop, then detach it."""
     process = getattr(transport, "_process", None)
     task.cancel()
-    done, _ = await asyncio.wait({task}, timeout=_CLOSE_GRACE)
+    done, _ = await asyncio.wait({task}, timeout=close_grace)
     process = process or getattr(transport, "_process", None)
     if process is not None and getattr(process, "returncode", None) is None:
         await asyncio.to_thread(_kill_tree, process)
     if not done:
-        done, _ = await asyncio.wait({task}, timeout=_CLOSE_GRACE)
+        done, _ = await asyncio.wait({task}, timeout=close_grace)
     if not done:
         _detach(task)
 
@@ -469,9 +470,11 @@ class AgentSdkClient(ClaudeSdkClient):
         *,
         transport_factory: Callable[..., Any] | None = None,
         query_factory: Callable[[Any, Any, Any, float], AsyncIterator[Any]] | None = None,
+        close_grace: float = _CLOSE_GRACE,
     ) -> None:
         self._transport_factory = transport_factory
         self._query_factory = query_factory
+        self._close_grace = close_grace
 
     @staticmethod
     def _message_model(message: Any, current: str | None) -> str | None:
@@ -861,6 +864,7 @@ class AgentSdkClient(ClaudeSdkClient):
                         options.tool_clock,
                         self._transport_factory,
                         self._query_factory,
+                        self._close_grace,
                     ),
                     stderr_lines,
                 )
@@ -947,6 +951,7 @@ class AgentSdkClient(ClaudeSdkClient):
                         stream_options.tool_clock,
                         self._transport_factory,
                         self._query_factory,
+                        self._close_grace,
                     ),
                     stderr_lines,
                 )

@@ -47,8 +47,7 @@ def stalled_sdk(monkeypatch):
             await transport.close()
 
     monkeypatch.setattr(sdk_client, "_kill_tree", lambda process: killed.append(process.pid))
-    monkeypatch.setattr(sdk_client, "_CLOSE_GRACE", 0.2)
-    return killed, sdk_client.AgentSdkClient(transport_factory=Transport, query_factory=query)
+    return killed, sdk_client.AgentSdkClient(transport_factory=Transport, query_factory=query, close_grace=0.2)
 
 
 def test_sdk_run_raises_idle_timeout(stalled_sdk):
@@ -60,7 +59,7 @@ def test_sdk_run_raises_idle_timeout(stalled_sdk):
     assert killed == [12345]
 
 
-def test_custom_query_without_initialized_sentinel_starts_idle_guard_at_first_message(monkeypatch):
+def test_custom_query_without_initialized_sentinel_starts_idle_guard_at_first_message():
     class Transport:
         def __init__(self, **kwargs):
             self._process = None
@@ -75,8 +74,7 @@ def test_custom_query_without_initialized_sentinel_starts_idle_guard_at_first_me
         yield object()
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(sdk_client, "_CLOSE_GRACE", 0.01)
-    client = sdk_client.AgentSdkClient(transport_factory=Transport, query_factory=query)
+    client = sdk_client.AgentSdkClient(transport_factory=Transport, query_factory=query, close_grace=0.01)
     started = time.monotonic()
     with pytest.raises(TimeoutError, match="went idle"):
         run_coroutine_blocking(lambda: client.run("test", options=ClaudeSdkOptions(stream_idle_timeout=0.05)))
