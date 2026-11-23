@@ -14,6 +14,7 @@ import os
 import subprocess
 import tempfile
 import warnings
+from collections import deque
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -199,7 +200,35 @@ def _log_cli_stderr(line: str) -> None:
     to actually see why the CLI died, at the cost of these lines going
     through Python logging instead of straight to the console.
     """
-    logger.warning("claude CLI stderr: %s", line.rstrip())
+    logger.debug("claude CLI stderr: %s", line.rstrip())
+
+
+_STDERR_TAIL_LINES = 20
+
+
+def _stderr_detail(message: str, lines: deque[str]) -> str:
+    if not lines:
+        return message
+    return f"{message}\nClaude CLI stderr (last {len(lines)} lines):\n" + "\n".join(lines)
+
+
+def _error_with_stderr(exc: Exception, lines: deque[str]) -> Exception:
+    """Attach the bounded CLI stderr tail without hiding the original cause."""
+    if not lines:
+        return exc
+    wrapped = RuntimeError(_stderr_detail(str(exc), lines))
+    wrapped.__cause__ = exc
+    return wrapped
+
+
+async def _with_stderr_tail(source: AsyncIterator[Any], lines: deque[str]) -> AsyncIterator[Any]:
+    """Preserve iterator cleanup while enriching any SDK/transport failure."""
+    try:
+        async with closing_iter(source) as messages:
+            async for message in messages:
+                yield message
+    except Exception as exc:
+        raise _error_with_stderr(exc, lines)
 
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -619,18 +648,21 @@ class AgentSdkClient(ClaudeSdkClient):
             # rather than a plain ``str`` (dict key types are invariant, so a
             # pre-built ``dict[str, ...]`` would not satisfy the parameter).
             hooks=sdk_hooks,
-            stderr=_log_cli_stderr,
+            stderr=options.stderr or _log_cli_stderr,
             setting_sources=list(options.setting_sources),
             # The env var, not the settings file: it takes precedence over
             # every settings source, so it says the same thing whether or not
             # this agent was told to read the user's settings. The SDK merges
             # this dict OVER the inherited environment rather than replacing
             # it, so naming one variable does not strip the rest.
-            env=(
-                {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(options.auto_compact_window)}
-                if options.auto_compact_window is not None
-                else {}
-            ),
+            env={
+                **(
+                    {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(options.auto_compact_window)}
+                    if options.auto_compact_window is not None
+                    else {}
+                ),
+                "CLAUDE_CODE_STREAM_CLOSE_TIMEOUT": str(round(options.initialize_timeout * 1000)),
+            },
             include_partial_messages=options.include_partial_messages,
             output_format=options.output_format,
         )
@@ -643,6 +675,14 @@ class AgentSdkClient(ClaudeSdkClient):
         except ImportError as exc:  # pragma: no cover
             raise ImportError("Claude Agent SDK is not installed") from exc
 
+        stderr_lines: deque[str] = deque(maxlen=_STDERR_TAIL_LINES)
+
+        def stderr(line: str) -> None:
+            clean = line.rstrip()
+            stderr_lines.append(clean)
+            _log_cli_stderr(clean)
+
+        options = replace(options, stderr=stderr)
         final: Any | None = None
         model: str | None = None
         sdk_prompt: str | AsyncIterator[dict[str, Any]] = (
@@ -651,7 +691,10 @@ class AgentSdkClient(ClaudeSdkClient):
         with _system_prompt_via_file(options) as cli_options:
             sdk_options = self._sdk_options(cli_options)
             async with closing_iter(
-                _bounded_query(sdk_prompt, sdk_options, options.stream_idle_timeout, options.tool_clock)
+                _with_stderr_tail(
+                    _bounded_query(sdk_prompt, sdk_options, options.stream_idle_timeout, options.tool_clock),
+                    stderr_lines,
+                )
             ) as messages:
                 async for message in messages:
                     self._report_session_id(options, message)
@@ -664,7 +707,9 @@ class AgentSdkClient(ClaudeSdkClient):
         if final.is_error:
             detail = "; ".join(final.errors or []) or final.result or final.subtype
             raise ClaudeSdkRequestError(
-                f"Claude Agent SDK failed: {detail}", status=final.api_error_status, session_id=final.session_id
+                _stderr_detail(f"Claude Agent SDK failed: {detail}", stderr_lines),
+                status=final.api_error_status,
+                session_id=final.session_id,
             )
 
         usage = final.usage or {}
@@ -712,6 +757,14 @@ class AgentSdkClient(ClaudeSdkClient):
         except ImportError as exc:  # pragma: no cover
             raise ImportError("Claude Agent SDK is not installed") from exc
 
+        stderr_lines: deque[str] = deque(maxlen=_STDERR_TAIL_LINES)
+
+        def stderr(line: str) -> None:
+            clean = line.rstrip()
+            stderr_lines.append(clean)
+            _log_cli_stderr(clean)
+
+        options = replace(options, stderr=stderr)
         saw_text = False
         saw_result = False
         model: str | None = None
@@ -723,11 +776,14 @@ class AgentSdkClient(ClaudeSdkClient):
         )
         with _system_prompt_via_file(stream_options) as cli_options:
             async with closing_iter(
-                _bounded_query(
-                    sdk_prompt,
-                    self._sdk_options(cli_options),
-                    stream_options.stream_idle_timeout,
-                    stream_options.tool_clock,
+                _with_stderr_tail(
+                    _bounded_query(
+                        sdk_prompt,
+                        self._sdk_options(cli_options),
+                        stream_options.stream_idle_timeout,
+                        stream_options.tool_clock,
+                    ),
+                    stderr_lines,
                 )
             ) as messages:
                 async for message in messages:
@@ -746,7 +802,7 @@ class AgentSdkClient(ClaudeSdkClient):
                         if message.is_error:
                             detail = "; ".join(message.errors or []) or message.result or message.subtype
                             raise ClaudeSdkRequestError(
-                                f"Claude Agent SDK failed: {detail}",
+                                _stderr_detail(f"Claude Agent SDK failed: {detail}", stderr_lines),
                                 status=message.api_error_status,
                                 session_id=message.session_id,
                             )

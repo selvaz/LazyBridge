@@ -95,7 +95,8 @@ print(desk("Explain the demonstration quote for EXAMPLE.").text())
 | `tag` | `"lazybridge"` | Best-effort SDK tag on a newly created durable session; None disables. |
 | `config` | default CodingAgentConfig | Native policy plus shared approval gate. |
 | `approval_gate` | `None` | Direct gate override; a different gate in config conflicts. |
-| `request_timeout` | `120.0` | Whole engine run, retries included; None disables. |
+| `request_timeout` | `120.0` | Shared processing budget across retries; CLI initialization uses its separate allowance. None disables. |
+| `initialize_timeout` | `180.0` | Per-attempt CLI initialize limit. Initialization is separate from the shared `request_timeout` processing budget. |
 | `stream_idle_timeout` | `90.0` | Maximum idle gap during streaming; None disables. |
 | `max_retries`, `retry_delay` | `3`, `1.0` | Transient retry budget and exponential-backoff base with jitter. |
 | `tool_timeout` | `None` | Per-application-tool deadline. |

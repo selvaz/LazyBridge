@@ -65,9 +65,12 @@ _TRANSIENT_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 #: match on, so match the SDK-authored prefix instead. A fresh retry (no
 #: ``resume``) reruns the same turn and reliably succeeds in practice.
 _SDK_RESULT_RACE_PREFIX = "Claude Code returned an error result:"
+_SDK_INITIALIZE_TIMEOUT = "Control request timeout: initialize"
 
 
 def _is_transient(exc: BaseException) -> bool:
+    if _SDK_INITIALIZE_TIMEOUT in str(exc):
+        return True
     if isinstance(exc, ClaudeSdkRequestError):
         return exc.status in _TRANSIENT_HTTP_STATUS
     if isinstance(exc, _NON_TRANSIENT_OS_TYPES):
@@ -171,6 +174,7 @@ class ClaudeCodeEngine:
         session_id: str | None = None,
         persist_session: bool = False,
         request_timeout: float | None = 120.0,
+        initialize_timeout: float = 180.0,
         stream_idle_timeout: float | None = 90.0,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -192,6 +196,9 @@ class ClaudeCodeEngine:
         if request_timeout is not None and request_timeout <= 0:
             raise ValueError(f"request_timeout must be > 0 or None, got {request_timeout!r}")
         self.request_timeout = request_timeout
+        if initialize_timeout <= 0:
+            raise ValueError(f"initialize_timeout must be > 0, got {initialize_timeout!r}")
+        self.initialize_timeout = initialize_timeout
         if stream_idle_timeout is not None and stream_idle_timeout <= 0:
             raise ValueError(f"stream_idle_timeout must be > 0 or None, got {stream_idle_timeout!r}")
         self.stream_idle_timeout = stream_idle_timeout
@@ -521,11 +528,16 @@ class ClaudeCodeEngine:
         with exponential backoff and jitter, at the coarse whole-call
         granularity available here (see ``_is_transient``).
 
-        ``request_timeout`` bounds the *entire* retry loop, not each
-        individual attempt — resetting the deadline per attempt would let
+        ``request_timeout`` is the processing budget for the *entire* retry
+        loop, not each individual attempt — resetting the deadline per attempt would let
         ``max_retries`` stalled attempts plus backoff block for a multiple
         of the advertised timeout (e.g. ~4x with the defaults) instead of
-        the deadline actually enforced.
+        the deadline actually enforced. CLI initialization has its own
+        ``initialize_timeout`` allowance per attempt and therefore does not
+        consume that shared processing budget. Since the SDK exposes no
+        separate awaitable for that phase, the allowances are added to the
+        outer deadline; the CLI still enforces each individual initialize
+        limit.
         """
 
         async def _attempt_loop() -> _T:
@@ -542,7 +554,15 @@ class ClaudeCodeEngine:
 
         if self.request_timeout is None:
             return await _attempt_loop()
-        return await wait_with_tool_clock(_attempt_loop(), self.request_timeout, tool_clock)
+        # The real adapter delegates each initialize deadline to the CLI. An
+        # injected protocol fake has no such phase unless it implements one,
+        # so retain the exact request deadline for deterministic fake-client
+        # tests (and for third-party clients).
+        initialize_allowance = (
+            self.initialize_timeout * (self.max_retries + 1) if isinstance(self._client, AgentSdkClient) else 0.0
+        )
+        timeout = self.request_timeout + initialize_allowance
+        return await wait_with_tool_clock(_attempt_loop(), timeout, tool_clock)
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
@@ -611,6 +631,7 @@ class ClaudeCodeEngine:
             tool_observer=observe,
             include_partial_messages=partial,
             stream_idle_timeout=self.stream_idle_timeout,
+            initialize_timeout=self.initialize_timeout,
             tool_clock=tool_clock,
             output_format=_output_format(output_type),
             on_session_id=self._learn_session if self._alias is not None else None,

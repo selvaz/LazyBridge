@@ -49,6 +49,10 @@ class ClaudeSdkOptions:
     mcp_tools: tuple[McpTool, ...] = ()
     include_partial_messages: bool = False
     stream_idle_timeout: float | None = None
+    #: Maximum time allowed for the CLI control-protocol initialize request.
+    initialize_timeout: float = 180.0
+    #: Internal per-call stderr sink installed by ``AgentSdkClient``.
+    stderr: Callable[[str], None] | None = None
     tool_clock: ToolClock | None = None
     #: Native structured output, in the Messages API shape the Agent SDK
     #: expects: ``{"type": "json_schema", "schema": {...}}``. The SDK turns

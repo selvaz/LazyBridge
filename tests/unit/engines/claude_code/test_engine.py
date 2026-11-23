@@ -9,6 +9,7 @@ from lazybridge import Agent, Envelope, Memory, Session, Tool
 from lazybridge.core.types import AudioContent, ImageContent
 from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent
+from lazybridge.engines.claude_code.sdk_client import AgentSdkClient
 from lazybridge.engines.coding import ApprovalDecision, ApprovalRequest, ask_approval
 from lazybridge.session import EventType
 
@@ -70,6 +71,50 @@ class FakeSdk:
         yield ClaudeSdkStreamEvent(text="streamed ")
         yield ClaudeSdkStreamEvent(text="answer")
         yield ClaudeSdkStreamEvent(session_id="fake-stream-session", final=True)
+
+
+def test_initialize_timeout_is_first_class_option():
+    sdk = FakeSdk()
+    engine = ClaudeCodeEngine(client=sdk, initialize_timeout=245)
+
+    Agent(engine=engine, name="timeout-option", tools=[get_quote])("quote")
+
+    assert engine.initialize_timeout == 245
+    assert sdk.options[0].initialize_timeout == 245
+
+
+def test_initialize_control_timeout_is_retried_outside_request_budget():
+    class InitializingSdk(AgentSdkClient):
+        def __init__(self):
+            self.calls = 0
+
+        async def run(self, prompt, *, options, attachments=()):
+            self.calls += 1
+            if self.calls == 1:
+                await asyncio.sleep(0.03)
+                raise Exception("Control request timeout: initialize")
+            return ClaudeSdkResult(text="ready")
+
+    sdk = InitializingSdk()
+    result = Agent(
+        engine=ClaudeCodeEngine(
+            client=sdk,
+            request_timeout=0.01,
+            initialize_timeout=0.05,
+            max_retries=1,
+            retry_delay=0.001,
+        ),
+        name="initialize-retry",
+    )("go")
+
+    assert result.ok
+    assert sdk.calls == 2
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_initialize_timeout_must_be_positive(value):
+    with pytest.raises(ValueError, match="initialize_timeout"):
+        ClaudeCodeEngine(initialize_timeout=value)
 
 
 def get_quote(symbol: str) -> dict[str, str]:

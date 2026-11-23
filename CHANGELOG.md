@@ -8,6 +8,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.13] - 2026-11-22
+
+### Added
+
+- Claude Code initialization now has a configurable 180-second timeout, retries initialize control timeouts, preserves the shared request-processing budget, and includes a bounded CLI stderr tail in failures while logging stderr at debug level.
+
 ## [1.8.12] - 2026-11-22
 
 Remaining medium findings of the delegation audit (M1, M2, M5, M6; #247). Verified Agent tools used as named Plan steps keep their judge; JSON `null` for an optional delegate parameter means "omitted"; ordinary tool arguments still coerce numeric strings, delegate parameters do not.
