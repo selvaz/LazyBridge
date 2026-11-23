@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from lazybridge.engines._tool_clock import ToolClock
 from lazybridge.engines.coding import ApprovalGate
@@ -115,10 +115,6 @@ class ClaudeSdkClient(Protocol):
     the prompt's text block; empty for a text-only run.
     """
 
-    # Most clients leave stream-idle enforcement to ClaudeCodeEngine. Clients
-    # that guard their lower-level message stream override this capability.
-    guards_stream_idle: bool = False
-
     async def run(
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> ClaudeSdkResult: ...
@@ -131,3 +127,10 @@ class ClaudeSdkClient(Protocol):
     def stream(
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> AsyncIterator[ClaudeSdkStreamEvent]: ...
+
+
+@runtime_checkable
+class StreamIdleGuard(Protocol):
+    """Optional capability for clients that enforce their own idle timeout."""
+
+    guards_stream_idle: bool

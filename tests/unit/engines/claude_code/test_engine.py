@@ -45,8 +45,6 @@ def fake_tag_session(monkeypatch):
 
 
 class FakeSdk:
-    guards_stream_idle = False
-
     def __init__(self):
         self.options: list[ClaudeSdkOptions] = []
         self.prompts: list[str] = []
@@ -156,8 +154,6 @@ def get_quote(symbol: str) -> dict[str, str]:
 @pytest.mark.parametrize("resolved", [None, "claude-sonnet-5"])
 def test_model_metadata_reports_requested_and_resolved(resolved):
     class Client:
-        guards_stream_idle = False
-
         async def run(self, *args, **kwargs):
             return ClaudeSdkResult(text="ok", model=resolved)
 
@@ -169,8 +165,6 @@ def test_model_metadata_reports_requested_and_resolved(resolved):
 
 def test_stream_model_response_uses_final_sdk_model():
     class Client:
-        guards_stream_idle = False
-
         async def stream(self, *args, **kwargs):
             yield ClaudeSdkStreamEvent(text="ok")
             yield ClaudeSdkStreamEvent(final=True, model="claude-sonnet-5")
@@ -191,8 +185,6 @@ def test_stream_model_response_uses_final_sdk_model():
 def test_cache_tokens_reach_model_response_and_metadata_blocking_and_stream():
     # Realistic multi-turn shape: input_tokens is only the uncached remainder.
     class Client:
-        guards_stream_idle = False
-
         async def run(self, prompt, *, options, attachments=()):
             return ClaudeSdkResult(
                 text="ok",
@@ -322,8 +314,6 @@ def test_no_session_means_no_tool_observer_reaches_the_sdk_while_streaming():
     """Mirrors the previous test for the ``stream`` path."""
 
     class StreamingPlainSdk:
-        guards_stream_idle = False
-
         def __init__(self):
             self.options: list[ClaudeSdkOptions] = []
 

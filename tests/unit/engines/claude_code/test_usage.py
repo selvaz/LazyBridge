@@ -205,8 +205,6 @@ def test_fetch_claude_usage_times_out_rather_than_hanging():
     from lazybridge.engines.claude_code.usage import fetch_claude_usage
 
     class _Hangs:
-        guards_stream_idle = False
-
         async def run(self, prompt, *, options, attachments=()):
             await anyio.sleep(10)
 

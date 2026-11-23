@@ -116,6 +116,11 @@ use `stream_idle_timeout`. Defaults remain 120 seconds, 120 seconds, and 90
 seconds respectively.
 The idle clock starts when the SDK initialize handshake completes.
 
+Custom `client=` implementations may omit `guards_stream_idle`; the engine
+then enforces the streaming idle timeout. A client that enforces the timeout
+on its own lower-level stream can set `guards_stream_idle = True` to avoid a
+second guard.
+
 ## Claude Code model identifiers
 
 The engine passes model strings to the installed runtime. Its default is

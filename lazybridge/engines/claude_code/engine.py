@@ -31,7 +31,7 @@ from lazybridge.model_tiers import translate_model
 from lazybridge.session import EventType
 
 from .mcp_adapter import to_mcp_tools
-from .protocol import ClaudeSdkClient, ClaudeSdkOptions
+from .protocol import ClaudeSdkClient, ClaudeSdkOptions, StreamIdleGuard
 from .sdk_client import AgentSdkClient, ClaudeSdkRequestError
 
 _logger = logging.getLogger(__name__)
@@ -68,6 +68,11 @@ _TRANSIENT_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 #: ``resume``) reruns the same turn and reliably succeeds in practice.
 _SDK_RESULT_RACE_PREFIX = "Claude Code returned an error result:"
 _SDK_INITIALIZE_TIMEOUT = "Control request timeout: initialize"
+
+
+def _guards_stream_idle(client: ClaudeSdkClient) -> bool:
+    """Default to the engine's idle guard for clients without the capability."""
+    return isinstance(client, StreamIdleGuard) and client.guards_stream_idle
 
 
 def _is_transient(exc: BaseException) -> bool:
@@ -505,7 +510,7 @@ class ClaudeCodeEngine:
         ``stream_idle_timeout`` is ``None``.
         """
         async with closing_iter(agen) as inner:
-            if self.stream_idle_timeout is None or self._client.guards_stream_idle:
+            if self.stream_idle_timeout is None or _guards_stream_idle(self._client):
                 async for item in inner:
                     yield item
                 return
