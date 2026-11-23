@@ -663,6 +663,8 @@ class ApprovalQueue:
             if (
                 request is None
                 or ticket.status != "approved"
+                or ticket.decision is None
+                or ticket.decision.verdict != "approved"
                 or ticket.consumed_at is not None
                 or ticket.expires_at <= now
                 or request.requested_by != executor.actor
@@ -814,8 +816,8 @@ class ApprovalQueue:
             raw = anchored.read(key)
             if not isinstance(raw, dict):
                 return False
-            ticket = _actionable(raw, datetime.now(UTC))
-            if ticket is None:
+            ticket = _actionable(raw, self._now())
+            if ticket is None or ticket.request is not None:
                 return False
             updated = ticket.model_copy(update={"status": "approved", "actor": actor, "channel": channel})
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
@@ -826,8 +828,8 @@ class ApprovalQueue:
             raw = anchored.read(key)
             if not isinstance(raw, dict):
                 return False
-            ticket = _actionable(raw, datetime.now(UTC))
-            if ticket is None:
+            ticket = _actionable(raw, self._now())
+            if ticket is None or ticket.request is not None:
                 return False
             updated = ticket.model_copy(
                 update={"status": "rejected", "actor": actor, "channel": channel, "reason": reason}
@@ -941,6 +943,8 @@ class ApprovalQueue:
             for key, raw in items:
                 if not isinstance(raw, dict) or raw.get("status") != "approved":
                     continue
+                if raw.get("request") is not None:
+                    continue
                 # A record written before `consumed_at` existed (any
                 # ticket created by a pre-1.7.0 ApprovalQueue) has no
                 # "consumed_at" KEY at all -- `raw.get("consumed_at")`
@@ -1011,6 +1015,8 @@ class ApprovalQueue:
             if not isinstance(raw, dict) or raw.get("status") != "approved" or raw.get("consumed_at"):
                 return False
             ticket = ApprovalTicket.model_validate(raw)
+            if ticket.request is not None:
+                return False
             updated = ticket.model_copy(update={"consumed_at": moment})
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
 

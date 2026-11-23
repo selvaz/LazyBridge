@@ -151,3 +151,52 @@ def test_legacy_history_deserializes_but_cannot_govern(registry: tuple[ApprovalQ
     assert queue.approve_ticket(legacy.approval_id, actor="owner", channel="cli")
     req = request(task_id="old")
     assert not queue.consume_typed_ticket(legacy.approval_id, executor=context(req))
+
+
+def test_legacy_decision_and_consumption_paths_refuse_typed_ticket(
+    registry: tuple[ApprovalQueue, Clock],
+) -> None:
+    queue, _ = registry
+    req = request()
+
+    approved = queue.create_typed_ticket(req, prompt="Push topic")
+    assert not queue.approve_ticket(approved.approval_id, actor="anyone", channel="legacy")
+    assert not queue.consume_typed_ticket(approved.approval_id, executor=context(req))
+
+    rejected = queue.create_typed_ticket(request(task_id="task-2"), prompt="Reject topic")
+    assert not queue.reject_ticket(rejected.approval_id, actor="anyone", channel="legacy", reason="no")
+
+    decided = queue.create_typed_ticket(request(task_id="task-3"), prompt="Reusable")
+    assert queue.decide_typed_ticket(
+        decided.approval_id, approver=ApproverContext(actor="owner"), verdict="approved"
+    )
+    assert not queue.claim_earlier_approval(task_id="task-3", prompt="Reusable")
+    assert not queue.mark_approval_consumed(decided.approval_id)
+
+
+def test_typed_consumption_requires_approved_decision_record(registry: tuple[ApprovalQueue, Clock]) -> None:
+    queue, _ = registry
+    req = request()
+    ticket = queue.create_typed_ticket(req)
+    key = queue._key(ticket.approval_id)
+    with queue._anchored() as anchored:
+        raw = anchored.read(key)
+        assert isinstance(raw, dict)
+        raw["status"] = "approved"
+        anchored.write(key, raw)
+
+    assert not queue.consume_typed_ticket(ticket.approval_id, executor=context(req))
+
+
+@pytest.mark.parametrize("verdict", ["approved", "rejected"])
+def test_legacy_decisions_use_injected_clock(registry: tuple[ApprovalQueue, Clock], verdict: str) -> None:
+    queue, clock = registry
+    ticket = queue.create_ticket(task_id="old", prompt="old prompt")
+    clock.now = ticket.expires_at
+
+    if verdict == "approved":
+        result = queue.approve_ticket(ticket.approval_id, actor="owner", channel="cli")
+    else:
+        result = queue.reject_ticket(ticket.approval_id, actor="owner", channel="cli", reason="no")
+
+    assert not result
