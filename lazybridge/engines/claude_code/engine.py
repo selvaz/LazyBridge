@@ -505,7 +505,7 @@ class ClaudeCodeEngine:
         ``stream_idle_timeout`` is ``None``.
         """
         async with closing_iter(agen) as inner:
-            if self.stream_idle_timeout is None:
+            if self.stream_idle_timeout is None or getattr(self._client, "guards_stream_idle", False):
                 async for item in inner:
                     yield item
                 return
@@ -569,6 +569,8 @@ class ClaudeCodeEngine:
         try:
             return await wait_with_tool_clock(_attempt_loop(), self.request_timeout, tool_clock)
         except TimeoutError as exc:
+            if getattr(exc, "claude_stream_idle", False):
+                raise
             now = tool_clock.now() if tool_clock is not None else time.monotonic()
             remaining = max(0.0, self.request_timeout - (now - started))
             raise self._request_timeout_error(remaining, stderr_lines) from exc

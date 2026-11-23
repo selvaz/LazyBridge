@@ -42,6 +42,7 @@ SYSTEM_PROMPT_FILE_THRESHOLD = 8_000
 
 _CLOSE_GRACE = 0.5
 _KILL_TIMEOUT = 10.0
+_INITIALIZED = object()
 
 
 def _kill_tree(process: Any) -> None:
@@ -110,16 +111,24 @@ async def _bounded_query(
             await queue.put(("end", None))
 
     task = asyncio.create_task(consume())
+    initialized = False
     try:
         while True:
             try:
-                kind, value = await wait_with_tool_clock(queue.get(), idle_timeout, tool_clock, idle=True)
+                kind, value = await wait_with_tool_clock(
+                    queue.get(), idle_timeout if initialized else None, tool_clock, idle=True
+                )
             except TimeoutError as exc:
-                raise TimeoutError(f"Claude Code stream went idle for {idle_timeout}s without a message") from exc
+                error = TimeoutError(f"Claude Code stream went idle for {idle_timeout}s without a message")
+                error.claude_stream_idle = True  # type: ignore[attr-defined]
+                raise error from exc
             if kind == "end":
                 return
             if kind == "error":
                 raise value
+            initialized = True
+            if value is _INITIALIZED:
+                continue
             yield value
     finally:
         if not task.done():
@@ -230,6 +239,7 @@ async def _query_with_explicit_initialize_timeout(
     try:
         await query.start()
         await query.initialize()
+        yield _INITIALIZED
         if isinstance(prompt, str):
             user_message = {
                 "type": "user",
@@ -443,6 +453,9 @@ class AgentSdkClient(ClaudeSdkClient):
     injection seam for tests and alternate transports, so tests never need to
     patch SDK internals or launch the real CLI.
     """
+
+    # The adapter guards the underlying SDK messages, including initialization.
+    guards_stream_idle = True
 
     def __init__(
         self,

@@ -10,6 +10,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Start the Claude Code idle clock after the initialize handshake completes.
 - Preserve long-running Claude Code stream semantics: `request_timeout` is a
   hard whole-call bound for buffered `run`, but does not cap a stream's total
   lifetime. Streams bound only initialization with `initialize_timeout` and

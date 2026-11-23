@@ -114,6 +114,7 @@ count as runtime time. A stream has no total `request_timeout` cap: only its
 initialize phase uses `initialize_timeout`, while gaps after initialization
 use `stream_idle_timeout`. Defaults remain 120 seconds, 120 seconds, and 90
 seconds respectively.
+The idle clock starts when the SDK initialize handshake completes.
 
 ## Claude Code model identifiers
 
