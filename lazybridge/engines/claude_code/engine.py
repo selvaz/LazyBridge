@@ -134,9 +134,10 @@ class ClaudeCodeEngine:
     count toward ``request_timeout`` or ``stream_idle_timeout``. Overlapping
     tool calls pause the request budget once; the idle window restarts after
     the last tool finishes. Native Claude tools still count as runtime time.
-    The effective CLI initialization wait is ``min(initialize_timeout,
-    remaining request_timeout budget)``. For cold starts, raise
-    ``request_timeout`` together with ``initialize_timeout``.
+    Buffered ``run`` calls have a hard ``request_timeout`` across
+    initialization, retries, and processing. Streaming calls deliberately do
+    not: only their initialization is bounded by ``initialize_timeout`` and
+    subsequent stalls by ``stream_idle_timeout``.
 
     **Durable sessions.** ``persist_session=True`` keeps the Claude Code
     session and exposes :attr:`session_id`; ``ClaudeCodeEngine(session_id=...)``
@@ -573,7 +574,7 @@ class ClaudeCodeEngine:
             raise self._request_timeout_error(remaining, stderr_lines) from exc
 
     def _request_timeout_error(self, remaining: float, stderr_lines: deque[str] | None) -> TimeoutError:
-        """Build the common run/stream request-budget failure."""
+        """Build a buffered-run request-budget failure."""
         message = (
             "Claude Code timeout: phase=request budget (initialization or processing); "
             f"configured request_timeout={self.request_timeout}s; remaining budget={remaining:.3f}s"
@@ -591,29 +592,6 @@ class ClaudeCodeEngine:
             stderr_lines.append(line.rstrip())
 
         return replace(options, stderr=capture_stderr), stderr_lines
-
-    async def _request_guarded_stream(
-        self,
-        agen: AsyncIterator[Any],
-        tool_clock: ToolClock,
-        stderr_lines: deque[str],
-    ) -> AsyncGenerator[Any, None]:
-        """Apply the whole-request processing budget to an SDK stream."""
-        if self.request_timeout is None:
-            async for item in agen:
-                yield item
-            return
-        started = tool_clock.now()
-        while True:
-            remaining = max(0.0, self.request_timeout - (tool_clock.now() - started))
-            try:
-                item = await wait_with_tool_clock(agen.__anext__(), remaining, tool_clock)
-            except StopAsyncIteration:
-                return
-            except TimeoutError as exc:
-                remaining = max(0.0, self.request_timeout - (tool_clock.now() - started))
-                raise self._request_timeout_error(remaining, stderr_lines) from exc
-            yield item
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
@@ -885,7 +863,7 @@ class ClaudeCodeEngine:
             cost_usd = 0.0
             resolved_model = None
             tool_clock = ToolClock()
-            options, stderr_lines = self._capture_stderr(
+            options, _stderr_lines = self._capture_stderr(
                 self._options(
                     tools,
                     observe if session else None,
@@ -897,20 +875,16 @@ class ClaudeCodeEngine:
                 )
             )
             async with closing_iter(
-                self._request_guarded_stream(
-                    self._idle_guarded_stream(
-                        self._client.stream(
-                            self._prompt(
-                                env,
-                                None if ((self.session_mode == "runtime" and session) or self._resuming) else memory,
-                            ),
-                            options=options,
-                            attachments=self._attachments(env),
+                self._idle_guarded_stream(
+                    self._client.stream(
+                        self._prompt(
+                            env,
+                            None if ((self.session_mode == "runtime" and session) or self._resuming) else memory,
                         ),
-                        tool_clock,
+                        options=options,
+                        attachments=self._attachments(env),
                     ),
                     tool_clock,
-                    stderr_lines,
                 ),
             ) as events:
                 async for event in events:

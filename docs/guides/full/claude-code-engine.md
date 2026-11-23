@@ -95,8 +95,8 @@ print(desk("Explain the demonstration quote for EXAMPLE.").text())
 | `tag` | `"lazybridge"` | Best-effort SDK tag on a newly created durable session; None disables. |
 | `config` | default CodingAgentConfig | Native policy plus shared approval gate. |
 | `approval_gate` | `None` | Direct gate override; a different gate in config conflicts. |
-| `request_timeout` | `120.0` | Hard shared processing budget across initialization, retries, backoff, and request processing. None disables. |
-| `initialize_timeout` | `120.0` | Per-attempt CLI initialize limit. The effective wait is `min(initialize_timeout, remaining request budget)`. Raise `request_timeout` too for cold starts. |
+| `request_timeout` | `120.0` | Hard shared budget across initialization, retries, backoff, and processing for buffered `run` calls. It does not cap a stream's total lifetime. None disables the `run` bound. |
+| `initialize_timeout` | `120.0` | Per-attempt CLI initialize limit for both `run` and stream. During `run`, the effective wait is also limited by the remaining request budget. |
 | `stream_idle_timeout` | `90.0` | Maximum idle gap during streaming; None disables. |
 | `max_retries`, `retry_delay` | `3`, `1.0` | Transient retry budget and exponential-backoff base with jitter. |
 | `tool_timeout` | `None` | Per-application-tool deadline. |
@@ -106,11 +106,14 @@ Positive deadlines/delay and nonnegative retries are checked at construction.
 Configure these on the engine when passing `Agent(engine=...)`.
 
 Time spent inside your own tools, e.g. sub-agents passed via `tools=`, does
-not count toward `request_timeout` or `stream_idle_timeout`. The request
-budget excludes intervals with at least one application tool in flight
+not count toward `request_timeout` or `stream_idle_timeout`. For buffered
+`run`, the request budget excludes intervals with at least one application tool in flight
 (overlapping calls count once); the idle window restarts when the last tool
 finishes. Native Claude Code tools such as Bash, Read and WebSearch still
-count as runtime time. Defaults remain 120 seconds and 90 seconds.
+count as runtime time. A stream has no total `request_timeout` cap: only its
+initialize phase uses `initialize_timeout`, while gaps after initialization
+use `stream_idle_timeout`. Defaults remain 120 seconds, 120 seconds, and 90
+seconds respectively.
 
 ## Claude Code model identifiers
 

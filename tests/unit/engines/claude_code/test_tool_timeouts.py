@@ -85,24 +85,19 @@ async def test_tool_error_releases_clock_and_runtime_stall_times_out(stream):
 
 
 @pytest.mark.asyncio
-async def test_stream_request_timeout_reports_stderr_tail():
-    class StallingStreamSdk(FakeSdk):
+async def test_stream_can_outlive_request_timeout_while_producing_output():
+    class LongStreamSdk(FakeSdk):
         async def stream(self, prompt, *, options, attachments=()):
-            assert options.stderr is not None
-            options.stderr("stream subprocess diagnostic")
-            await asyncio.sleep(10)
-            yield  # pragma: no cover
+            for text in ("a", "b", "c", "d"):
+                await asyncio.sleep(0.03)
+                yield ClaudeSdkStreamEvent(text=text)
+            yield ClaudeSdkStreamEvent(final=True)
 
-    agent = Agent(engine=ClaudeCodeEngine(client=StallingStreamSdk(), request_timeout=0.01, max_retries=0))
+    agent = Agent(
+        engine=ClaudeCodeEngine(client=LongStreamSdk(), request_timeout=0.05, stream_idle_timeout=0.1, max_retries=0)
+    )
 
-    with pytest.raises(TimeoutError) as exc_info:
-        _ = [chunk async for chunk in agent.stream("stall")]
-
-    message = str(exc_info.value)
-    assert "phase=request budget" in message
-    assert "configured request_timeout=0.01s" in message
-    assert "remaining budget=0.000s" in message
-    assert "CLI stderr tail:\nstream subprocess diagnostic" in message
+    assert "".join([chunk async for chunk in agent.stream("long")]) == "abcd"
 
 
 @pytest.mark.parametrize("stream", [False, True])

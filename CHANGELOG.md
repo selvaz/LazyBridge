@@ -8,6 +8,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve long-running Claude Code stream semantics: `request_timeout` is a
+  hard whole-call bound for buffered `run`, but does not cap a stream's total
+  lifetime. Streams bound only initialization with `initialize_timeout` and
+  subsequent idle gaps with `stream_idle_timeout`.
+
 ## [1.8.13] - 2026-11-22
 
 ### Added

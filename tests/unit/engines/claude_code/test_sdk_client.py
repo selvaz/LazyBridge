@@ -6,6 +6,7 @@ import os
 
 import pytest
 
+from lazybridge import Agent
 from lazybridge.engines.claude_code import ClaudeCodeEngine
 from lazybridge.engines.claude_code.mcp_adapter import to_mcp_tools
 from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
@@ -441,6 +442,38 @@ def test_initialize_timeout_reaches_real_sdk_query_without_parent_environment(mo
     assert query._initialize_timeout == 2.5
     assert "CLAUDE_CODE_STREAM_CLOSE_TIMEOUT" not in sdk_options.env
     assert os.environ["CLAUDE_CODE_STREAM_CLOSE_TIMEOUT"] == "parent-value"
+
+
+@pytest.mark.asyncio
+async def test_stream_initialize_timeout_includes_stderr_tail(monkeypatch):
+    async def initializing_query(prompt, sdk_options, initialize_timeout, idle_timeout, tool_clock, *args):
+        assert initialize_timeout == 0.03
+        assert sdk_options.stderr is not None
+        sdk_options.stderr("initialize subprocess diagnostic")
+        try:
+            await asyncio.wait_for(asyncio.sleep(10), initialize_timeout)
+        except TimeoutError as exc:
+            raise TimeoutError("Control request timeout: initialize") from exc
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("lazybridge.engines.claude_code.sdk_client._bounded_query", initializing_query)
+    agent = Agent(
+        ClaudeCodeEngine(
+            client=AgentSdkClient(),
+            request_timeout=0.01,
+            initialize_timeout=0.03,
+            stream_idle_timeout=1,
+            max_retries=0,
+        )
+    )
+
+    with pytest.raises(TimeoutError) as exc_info:
+        _ = [chunk async for chunk in agent.stream("initialize")]
+
+    message = str(exc_info.value)
+    assert "Control request timeout: initialize" in message
+    assert "Claude CLI stderr" in message
+    assert "initialize subprocess diagnostic" in message
 
 
 def test_the_policy_reaches_the_options_the_engine_builds():
