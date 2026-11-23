@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import os
 
 import pytest
@@ -445,21 +446,36 @@ def test_initialize_timeout_reaches_real_sdk_query_without_parent_environment(mo
 
 
 @pytest.mark.asyncio
-async def test_stream_initialize_timeout_includes_stderr_tail(monkeypatch):
-    async def initializing_query(prompt, sdk_options, initialize_timeout, idle_timeout, tool_clock, *args):
-        assert initialize_timeout == 0.03
-        assert sdk_options.stderr is not None
-        sdk_options.stderr("initialize subprocess diagnostic")
-        try:
-            await asyncio.wait_for(asyncio.sleep(10), initialize_timeout)
-        except TimeoutError as exc:
-            raise TimeoutError("Control request timeout: initialize") from exc
-        yield  # pragma: no cover
+async def test_stream_initialize_timeout_includes_stderr_tail():
+    class SilentTransport:
+        def __init__(self, *, prompt, options):
+            self.options = options
+            self.requests = []
+            self.closed = False
 
-    monkeypatch.setattr("lazybridge.engines.claude_code.sdk_client._bounded_query", initializing_query)
+        async def connect(self):
+            self.options.stderr("initialize subprocess diagnostic")
+
+        async def write(self, data):
+            self.requests.append(json.loads(data))
+
+        async def read_messages(self):
+            await asyncio.Event().wait()
+            yield  # pragma: no cover
+
+        async def close(self):
+            self.closed = True
+
+    transports = []
+
+    def transport_factory(**kwargs):
+        transport = SilentTransport(**kwargs)
+        transports.append(transport)
+        return transport
+
     agent = Agent(
         ClaudeCodeEngine(
-            client=AgentSdkClient(),
+            client=AgentSdkClient(transport_factory=transport_factory),
             request_timeout=0.01,
             initialize_timeout=0.03,
             stream_idle_timeout=1,
@@ -467,13 +483,15 @@ async def test_stream_initialize_timeout_includes_stderr_tail(monkeypatch):
         )
     )
 
-    with pytest.raises(TimeoutError) as exc_info:
+    with pytest.raises(Exception, match="Control request timeout: initialize") as exc_info:
         _ = [chunk async for chunk in agent.stream("initialize")]
 
     message = str(exc_info.value)
     assert "Control request timeout: initialize" in message
     assert "Claude CLI stderr" in message
     assert "initialize subprocess diagnostic" in message
+    assert transports[0].requests[0]["request"]["subtype"] == "initialize"
+    assert transports[0].closed
 
 
 def test_the_policy_reaches_the_options_the_engine_builds():
