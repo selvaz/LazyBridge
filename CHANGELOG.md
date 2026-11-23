@@ -19,7 +19,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Claude Code initialization now has a configurable 180-second timeout, retries initialize control timeouts, preserves the shared request-processing budget, and includes a bounded CLI stderr tail in failures while logging stderr at debug level.
+- Claude Code initialization now has a configurable 120-second timeout and retries initialize control timeouts for buffered runs. Buffered runs share the request timeout across initialization, retries, and processing; streams use initialization and idle timeouts. Failures include a bounded CLI stderr tail when available, with stderr logged at debug level.
 
 ## [1.8.12] - 2026-11-22
 

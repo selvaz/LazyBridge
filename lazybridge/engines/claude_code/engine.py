@@ -585,7 +585,7 @@ class ClaudeCodeEngine:
         return TimeoutError(message)
 
     def _capture_stderr(self, options: ClaudeSdkOptions) -> tuple[ClaudeSdkOptions, deque[str]]:
-        """Attach the bounded stderr tail shared by buffered and streaming calls."""
+        """Attach a bounded stderr tail for buffered request timeouts."""
         stderr_lines: deque[str] = deque(maxlen=20)
 
         def capture_stderr(line: str) -> None:
@@ -863,16 +863,14 @@ class ClaudeCodeEngine:
             cost_usd = 0.0
             resolved_model = None
             tool_clock = ToolClock()
-            options, _stderr_lines = self._capture_stderr(
-                self._options(
-                    tools,
-                    observe if session else None,
-                    output_type=output_type,
-                    partial=True,
-                    resume=self._resume_id(session, agent_name),
-                    gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
-                    tool_clock=tool_clock,
-                )
+            options = self._options(
+                tools,
+                observe if session else None,
+                output_type=output_type,
+                partial=True,
+                resume=self._resume_id(session, agent_name),
+                gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
+                tool_clock=tool_clock,
             )
             async with closing_iter(
                 self._idle_guarded_stream(
