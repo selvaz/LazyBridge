@@ -139,7 +139,7 @@ def resolve(profile: str, grant: TaskGrant, document: ProfileDocument | None = N
     unknown_tools = tools - TOOL_GRANTS
     if unknown_tools:
         raise PolicyError(f"unknown tool grant(s): {', '.join(sorted(unknown_tools))}")
-    routes = _strings(grant.grants.get("network_routes", ()), "network_routes")
+    routes = tuple(sorted(set(_strings(grant.grants.get("network_routes", ()), "network_routes"))))
     if grant.network == "off" and routes:
         raise PolicyError("network_routes require network='on'")
     servers = _normalise_servers(grant.grants)
