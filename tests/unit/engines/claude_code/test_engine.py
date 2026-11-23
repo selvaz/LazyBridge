@@ -182,6 +182,21 @@ def test_stream_model_response_uses_final_sdk_model():
     assert event["model_resolved"] is True
 
 
+@pytest.mark.asyncio
+async def test_custom_client_without_idle_capability_uses_engine_guard():
+    class Client:
+        async def stream(self, prompt, *, options, attachments=()):
+            yield ClaudeSdkStreamEvent(text="ready")
+            if prompt == "stall":
+                await asyncio.Event().wait()
+            yield ClaudeSdkStreamEvent(final=True)
+
+    agent = Agent(ClaudeCodeEngine(client=Client(), stream_idle_timeout=0.05, max_retries=0))
+    assert "".join([chunk async for chunk in agent.stream("normal")]) == "ready"
+    with pytest.raises(TimeoutError, match="stream went idle"):
+        _ = [chunk async for chunk in agent.stream("stall")]
+
+
 def test_cache_tokens_reach_model_response_and_metadata_blocking_and_stream():
     # Realistic multi-turn shape: input_tokens is only the uncached remainder.
     class Client:
