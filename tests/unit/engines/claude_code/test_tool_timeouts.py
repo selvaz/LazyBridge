@@ -70,8 +70,10 @@ async def test_tool_error_releases_clock_and_runtime_stall_times_out(stream):
         tools=[broken_tool],
     )
     if stream:
-        with pytest.raises(TimeoutError, match="Claude Code stream went idle"):
+        with pytest.raises(TimeoutError, match="phase=request budget") as exc_info:
             _ = [chunk async for chunk in agent.stream("fail")]
+        assert "remaining budget=0.000s" in str(exc_info.value)
+        assert "runtime stalled after tool failure" in str(exc_info.value)
     else:
         result = await agent.run("fail")
         assert not result.ok
@@ -80,6 +82,27 @@ async def test_tool_error_releases_clock_and_runtime_stall_times_out(stream):
         assert "runtime stalled after tool failure" in result.error.message
         assert "stderr tail unavailable" not in result.error.message
     assert not sdk.options[-1].tool_clock.active
+
+
+@pytest.mark.asyncio
+async def test_stream_request_timeout_reports_stderr_tail():
+    class StallingStreamSdk(FakeSdk):
+        async def stream(self, prompt, *, options, attachments=()):
+            assert options.stderr is not None
+            options.stderr("stream subprocess diagnostic")
+            await asyncio.sleep(10)
+            yield  # pragma: no cover
+
+    agent = Agent(engine=ClaudeCodeEngine(client=StallingStreamSdk(), request_timeout=0.01, max_retries=0))
+
+    with pytest.raises(TimeoutError) as exc_info:
+        _ = [chunk async for chunk in agent.stream("stall")]
+
+    message = str(exc_info.value)
+    assert "phase=request budget" in message
+    assert "configured request_timeout=0.01s" in message
+    assert "remaining budget=0.000s" in message
+    assert "CLI stderr tail:\nstream subprocess diagnostic" in message
 
 
 @pytest.mark.parametrize("stream", [False, True])

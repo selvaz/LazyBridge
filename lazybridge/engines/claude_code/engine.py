@@ -570,14 +570,50 @@ class ClaudeCodeEngine:
         except TimeoutError as exc:
             now = tool_clock.now() if tool_clock is not None else time.monotonic()
             remaining = max(0.0, self.request_timeout - (now - started))
-            message = (
-                "Claude Code timeout: phase=request budget (initialization or processing); "
-                f"configured request_timeout={self.request_timeout}s; remaining budget={remaining:.3f}s"
-            )
-            if stderr_lines:
-                stderr_tail = "\n".join(stderr_lines)
-                message += f"; CLI stderr tail:\n{stderr_tail}"
-            raise TimeoutError(message) from exc
+            raise self._request_timeout_error(remaining, stderr_lines) from exc
+
+    def _request_timeout_error(self, remaining: float, stderr_lines: deque[str] | None) -> TimeoutError:
+        """Build the common run/stream request-budget failure."""
+        message = (
+            "Claude Code timeout: phase=request budget (initialization or processing); "
+            f"configured request_timeout={self.request_timeout}s; remaining budget={remaining:.3f}s"
+        )
+        if stderr_lines:
+            stderr_tail = "\n".join(stderr_lines)
+            message += f"; CLI stderr tail:\n{stderr_tail}"
+        return TimeoutError(message)
+
+    def _capture_stderr(self, options: ClaudeSdkOptions) -> tuple[ClaudeSdkOptions, deque[str]]:
+        """Attach the bounded stderr tail shared by buffered and streaming calls."""
+        stderr_lines: deque[str] = deque(maxlen=20)
+
+        def capture_stderr(line: str) -> None:
+            stderr_lines.append(line.rstrip())
+
+        return replace(options, stderr=capture_stderr), stderr_lines
+
+    async def _request_guarded_stream(
+        self,
+        agen: AsyncIterator[Any],
+        tool_clock: ToolClock,
+        stderr_lines: deque[str],
+    ) -> AsyncGenerator[Any, None]:
+        """Apply the whole-request processing budget to an SDK stream."""
+        if self.request_timeout is None:
+            async for item in agen:
+                yield item
+            return
+        started = tool_clock.now()
+        while True:
+            remaining = max(0.0, self.request_timeout - (tool_clock.now() - started))
+            try:
+                item = await wait_with_tool_clock(agen.__anext__(), remaining, tool_clock)
+            except StopAsyncIteration:
+                return
+            except TimeoutError as exc:
+                remaining = max(0.0, self.request_timeout - (tool_clock.now() - started))
+                raise self._request_timeout_error(remaining, stderr_lines) from exc
+            yield item
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""
@@ -700,12 +736,7 @@ class ClaudeCodeEngine:
                     gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
                     tool_clock=tool_clock,
                 )
-                stderr_lines: deque[str] = deque(maxlen=20)
-
-                def capture_stderr(line: str) -> None:
-                    stderr_lines.append(line.rstrip())
-
-                options = replace(options, stderr=capture_stderr)
+                options, stderr_lines = self._capture_stderr(options)
                 result = await self._call_with_retries(
                     lambda: self._client.run(prompt, options=options, attachments=attachments),
                     tool_clock,
@@ -854,26 +885,33 @@ class ClaudeCodeEngine:
             cost_usd = 0.0
             resolved_model = None
             tool_clock = ToolClock()
+            options, stderr_lines = self._capture_stderr(
+                self._options(
+                    tools,
+                    observe if session else None,
+                    output_type=output_type,
+                    partial=True,
+                    resume=self._resume_id(session, agent_name),
+                    gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
+                    tool_clock=tool_clock,
+                )
+            )
             async with closing_iter(
-                self._idle_guarded_stream(
-                    self._client.stream(
-                        self._prompt(
-                            env,
-                            None if ((self.session_mode == "runtime" and session) or self._resuming) else memory,
+                self._request_guarded_stream(
+                    self._idle_guarded_stream(
+                        self._client.stream(
+                            self._prompt(
+                                env,
+                                None if ((self.session_mode == "runtime" and session) or self._resuming) else memory,
+                            ),
+                            options=options,
+                            attachments=self._attachments(env),
                         ),
-                        options=self._options(
-                            tools,
-                            observe if session else None,
-                            output_type=output_type,
-                            partial=True,
-                            resume=self._resume_id(session, agent_name),
-                            gate=self._scoped_gate(session, agent_name) if self.approval_gate is not None else None,
-                            tool_clock=tool_clock,
-                        ),
-                        attachments=self._attachments(env),
+                        tool_clock,
                     ),
                     tool_clock,
-                )
+                    stderr_lines,
+                ),
             ) as events:
                 async for event in events:
                     if event.text:
