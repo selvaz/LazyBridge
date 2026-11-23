@@ -19,9 +19,12 @@ def compile_claude(policy: EffectivePolicy) -> dict[str, Any]:
         name: {key: _thaw(value) for key, value in config.items() if key != "tools"}
         for name, config in sorted(policy.mcp_servers.items())
     }
-    allow = []
-    deny = []
-    for tool_class, names in (("read", ("Read", "Glob", "Grep")), ("edit", ("Edit", "Write"))):
+    allow: list[str] = []
+    deny: list[str] = []
+    for tool_class, names in (
+        ("read", ("Read", "Glob", "Grep")),
+        ("edit", ("Edit", "MultiEdit", "Write", "NotebookEdit")),
+    ):
         (allow if tool_class in policy.tool_classes else deny).extend(names)
     # No command allowlist exists in the grant schema, so no Bash command is admitted.
     deny.append("Bash")
@@ -47,7 +50,7 @@ def compile_claude(policy: EffectivePolicy) -> dict[str, Any]:
 def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
     """Generate a session CODEX_HOME config; admission requires launch verification."""
     writable = "edit" in policy.tool_classes
-    overrides = {
+    overrides: dict[str, Any] = {
         "sandbox_mode": "workspace-write" if writable else "read-only",
         "approval_policy": "never",
         "sandbox_workspace_write": {

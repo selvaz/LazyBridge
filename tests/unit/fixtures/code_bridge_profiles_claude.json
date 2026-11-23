@@ -19,6 +19,8 @@
         "Edit",
         "Glob",
         "Grep",
+        "MultiEdit",
+        "NotebookEdit",
         "Read",
         "WebFetch",
         "WebSearch",
