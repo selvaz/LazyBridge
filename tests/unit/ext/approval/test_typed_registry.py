@@ -77,6 +77,14 @@ def test_rejects_wrong_digest_at_creation(registry: tuple[ApprovalQueue, Clock])
         queue.create_typed_ticket(bad)
 
 
+def test_create_digests_the_validated_canonical_request() -> None:
+    req = request(attempt="2", target={"repo": "org/repo"})
+
+    assert req.attempt == 2
+    assert req.target == ApprovalTarget(repo="org/repo")
+    assert req.digest == req.canonical_digest()
+
+
 @pytest.mark.parametrize(
     "change",
     [

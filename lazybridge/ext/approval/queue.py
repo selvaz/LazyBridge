@@ -116,8 +116,8 @@ class TypedApprovalRequest(BaseModel):
     @classmethod
     def create(cls, **values: Any) -> TypedApprovalRequest:
         """Build a request and populate its canonical digest."""
-        provisional = cls.model_construct(**values, digest="")
-        return cls.model_validate({**values, "digest": provisional.canonical_digest()})
+        provisional = cls.model_validate({**values, "digest": ""})
+        return provisional.model_copy(update={"digest": provisional.canonical_digest()})
 
     def canonical_digest(self) -> str:
         body = self.model_dump(mode="json", exclude={"digest"})
