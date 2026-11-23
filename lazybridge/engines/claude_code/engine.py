@@ -69,6 +69,8 @@ _SDK_INITIALIZE_TIMEOUT = "Control request timeout: initialize"
 
 
 def _is_transient(exc: BaseException) -> bool:
+    if exc.__cause__ is not None and exc.__cause__ is not exc:
+        return _is_transient(exc.__cause__)
     if _SDK_INITIALIZE_TIMEOUT in str(exc):
         return True
     if isinstance(exc, ClaudeSdkRequestError):
@@ -532,12 +534,10 @@ class ClaudeCodeEngine:
         loop, not each individual attempt — resetting the deadline per attempt would let
         ``max_retries`` stalled attempts plus backoff block for a multiple
         of the advertised timeout (e.g. ~4x with the defaults) instead of
-        the deadline actually enforced. CLI initialization has its own
-        ``initialize_timeout`` allowance per attempt and therefore does not
-        consume that shared processing budget. Since the SDK exposes no
-        separate awaitable for that phase, the allowances are added to the
-        outer deadline; the CLI still enforces each individual initialize
-        limit.
+        the deadline actually enforced. Initialization attempts, retry
+        backoff, and request processing all spend from this same budget. If
+        ``initialize_timeout`` exceeds the remaining request budget, the
+        outer request deadline wins.
         """
 
         async def _attempt_loop() -> _T:
@@ -554,15 +554,7 @@ class ClaudeCodeEngine:
 
         if self.request_timeout is None:
             return await _attempt_loop()
-        # The real adapter delegates each initialize deadline to the CLI. An
-        # injected protocol fake has no such phase unless it implements one,
-        # so retain the exact request deadline for deterministic fake-client
-        # tests (and for third-party clients).
-        initialize_allowance = (
-            self.initialize_timeout * (self.max_retries + 1) if isinstance(self._client, AgentSdkClient) else 0.0
-        )
-        timeout = self.request_timeout + initialize_allowance
-        return await wait_with_tool_clock(_attempt_loop(), timeout, tool_clock)
+        return await wait_with_tool_clock(_attempt_loop(), self.request_timeout, tool_clock)
 
     def _scoped_gate(self, session: Any, agent_name: str) -> ApprovalGate:
         """The configured gate, with ``allow_session`` scoped per agent+Session."""

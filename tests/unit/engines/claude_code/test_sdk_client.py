@@ -422,26 +422,24 @@ def test_the_compaction_window_travels_as_an_env_var_not_a_settings_file():
     """
     sdk_options = AgentSdkClient._sdk_options(ClaudeSdkOptions(auto_compact_window=140_000))
 
-    assert sdk_options.env == {
-        "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "140000",
-        "CLAUDE_CODE_STREAM_CLOSE_TIMEOUT": "180000",
-    }
+    assert sdk_options.env == {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "140000"}
     assert sdk_options.setting_sources == []
 
 
 def test_no_window_means_no_environment_of_our_own():
     """An empty dict, not a stray variable: the CLI keeps its tuned default."""
-    assert AgentSdkClient._sdk_options(ClaudeSdkOptions()).env == {
-        "CLAUDE_CODE_STREAM_CLOSE_TIMEOUT": "180000"
-    }
+    assert AgentSdkClient._sdk_options(ClaudeSdkOptions()).env == {}
 
 
-def test_initialize_timeout_is_set_only_on_child_environment(monkeypatch):
+def test_initialize_timeout_reaches_real_sdk_query_without_parent_environment(monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "parent-value")
+    from lazybridge.engines.claude_code.sdk_client import _build_explicit_timeout_query
 
     sdk_options = AgentSdkClient._sdk_options(ClaudeSdkOptions(initialize_timeout=2.5))
+    query = _build_explicit_timeout_query(object(), sdk_options, 2.5)
 
-    assert sdk_options.env["CLAUDE_CODE_STREAM_CLOSE_TIMEOUT"] == "2500"
+    assert query._initialize_timeout == 2.5
+    assert "CLAUDE_CODE_STREAM_CLOSE_TIMEOUT" not in sdk_options.env
     assert os.environ["CLAUDE_CODE_STREAM_CLOSE_TIMEOUT"] == "parent-value"
 
 

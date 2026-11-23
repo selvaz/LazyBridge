@@ -83,7 +83,7 @@ def test_initialize_timeout_is_first_class_option():
     assert sdk.options[0].initialize_timeout == 245
 
 
-def test_initialize_control_timeout_is_retried_outside_request_budget():
+def test_initialize_control_timeout_spends_request_budget():
     class InitializingSdk(AgentSdkClient):
         def __init__(self):
             self.calls = 0
@@ -107,8 +107,21 @@ def test_initialize_control_timeout_is_retried_outside_request_budget():
         name="initialize-retry",
     )("go")
 
-    assert result.ok
-    assert sdk.calls == 2
+    assert not result.ok
+    assert result.error is not None
+    assert "timeout" in result.error.message.lower()
+    assert sdk.calls == 1
+
+
+def test_stderr_wrapped_initialize_timeout_remains_transient():
+    from collections import deque
+
+    from lazybridge.engines.claude_code.engine import _is_transient
+    from lazybridge.engines.claude_code.sdk_client import _error_with_stderr
+
+    error = _error_with_stderr(Exception("Control request timeout: initialize"), deque(["cli detail"]))
+
+    assert _is_transient(error)
 
 
 @pytest.mark.parametrize("value", [0, -1])
