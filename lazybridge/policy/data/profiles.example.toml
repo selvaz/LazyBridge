@@ -1,0 +1,15 @@
+# Execution profiles are ordered permission ceilings. Grants may narrow them.
+[profiles.read_only]
+level = 0
+tools = ["Glob", "Grep", "Read"]
+network = false
+
+[profiles.workspace]
+level = 1
+tools = ["Edit", "Glob", "Grep", "Read", "Write"]
+network = false
+
+[profiles.networked]
+level = 2
+tools = ["Edit", "Glob", "Grep", "Read", "WebFetch", "WebSearch", "Write"]
+network = true
