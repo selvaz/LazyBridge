@@ -11,7 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from lazybridge.ext.receipt.models import PublicationReceipt
+from lazybridge.ext.receipt.models import Issuer, PublicationReceipt
 
 try:
     from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
@@ -68,7 +68,7 @@ class IssuerKey:
     @property
     def key_id(self) -> str:
         """Stable identifier derived from the public key."""
-        return f"ed25519:{self.fingerprint()}"
+        return _key_id(self.fingerprint())
 
     def public_key_pem(self) -> bytes:
         """Export the public key in SubjectPublicKeyInfo PEM format."""
@@ -79,7 +79,23 @@ class IssuerKey:
 
     def fingerprint(self) -> str:
         """Return the lowercase hex SHA-256 digest of the raw public key."""
-        return hashlib.sha256(self._key.public_key().public_bytes_raw()).hexdigest()
+        return _fingerprint(self._key.public_key())
+
+
+def _fingerprint(public_key: Ed25519PublicKey) -> str:
+    return hashlib.sha256(public_key.public_bytes_raw()).hexdigest()
+
+
+def _key_id(fingerprint: str) -> str:
+    return f"ed25519:{fingerprint}"
+
+
+def _issuer_matches(issuer: Issuer, fingerprint: str) -> bool:
+    return (
+        issuer.algorithm == "ed25519"
+        and issuer.public_key_fingerprint == fingerprint
+        and issuer.key_id == _key_id(fingerprint)
+    )
 
 
 @dataclass(frozen=True)
@@ -100,23 +116,30 @@ def canonical_bytes(receipt: PublicationReceipt) -> bytes:
 
 
 def sign(receipt: PublicationReceipt, key: IssuerKey) -> PublicationReceipt:
-    """Return a copy signed by the issuer key."""
+    """Return a signed copy, raising ValueError if the issuer fields mismatch."""
     snapshot = receipt.model_copy(deep=True)
+    if not _issuer_matches(snapshot.issuer, key.fingerprint()):
+        raise ValueError("The receipt issuer does not match the signing key")
     signature = base64.b64encode(key._key.sign(canonical_bytes(snapshot))).decode("ascii")
     return snapshot.model_copy(update={"signature": signature})
 
 
-def _signature_valid(body: bytes, signature: object, public_key: bytes | str | Ed25519PublicKey) -> bool:
-    if not isinstance(signature, str):
-        return False
+def _load_public_key(public_key: bytes | str | Ed25519PublicKey) -> Ed25519PublicKey | None:
     try:
         if isinstance(public_key, str):
             public_key = public_key.encode("ascii")
         key = serialization.load_pem_public_key(public_key) if isinstance(public_key, bytes) else public_key
-        if not isinstance(key, Ed25519PublicKey):
-            return False
-        key.verify(base64.b64decode(signature, validate=True), body)
-    except (InvalidSignature, UnsupportedAlgorithm, ValueError):
+    except (UnsupportedAlgorithm, ValueError):
+        return None
+    return key if isinstance(key, Ed25519PublicKey) else None
+
+
+def _signature_valid(body: bytes, signature: object, public_key: Ed25519PublicKey) -> bool:
+    if not isinstance(signature, str):
+        return False
+    try:
+        public_key.verify(base64.b64decode(signature, validate=True), body)
+    except (InvalidSignature, ValueError):
         return False
     return True
 
@@ -132,14 +155,19 @@ def verify(
         body = canonical_bytes(receipt)
     except ValueError:
         return VerificationResult(False, "bad_signature")
-    if not _signature_valid(body, receipt.signature, public_key):
+    key = _load_public_key(public_key)
+    if key is None or not _signature_valid(body, receipt.signature, key):
         return VerificationResult(False, "bad_signature")
-    return _verify_claims(receipt, expected_head_sha)
+    return _verify_claims(receipt, key, expected_head_sha)
 
 
-def _verify_claims(receipt: PublicationReceipt, expected_head_sha: str | None) -> VerificationResult:
+def _verify_claims(
+    receipt: PublicationReceipt, public_key: Ed25519PublicKey, expected_head_sha: str | None
+) -> VerificationResult:
     if receipt.receipt_version != 1:
         return VerificationResult(False, "unknown_version")
+    if not _issuer_matches(receipt.issuer, _fingerprint(public_key)):
+        return VerificationResult(False, "issuer_mismatch")
     head_sha = receipt.publication.head_sha
     if receipt.reviewer.reviewed_sha != head_sha:
         return VerificationResult(False, "review_head_mismatch")

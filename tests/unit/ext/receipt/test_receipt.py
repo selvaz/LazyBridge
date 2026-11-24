@@ -1,5 +1,6 @@
 """Publication receipt encoding, signatures, and key persistence."""
 
+import base64
 import hashlib
 import json
 import os
@@ -113,6 +114,20 @@ def test_bad_signature(fields: dict[str, Any], key: IssuerKey, tmp_path: Path) -
     assert verify(modified, key.public_key_pem()) == VerificationResult(False, "bad_signature")
     wrong_key = IssuerKey(tmp_path / "other.pem")
     assert verify(signed, wrong_key.public_key_pem()) == VerificationResult(False, "bad_signature")
+
+
+@pytest.mark.parametrize("issuer_field", ["public_key_fingerprint", "key_id"])
+def test_issuer_mismatch(fields: dict[str, Any], key: IssuerKey, issuer_field: str) -> None:
+    fields["issuer"][issuer_field] = "wrong-issuer"
+    receipt = PublicationReceipt.model_validate(fields)
+    with pytest.raises(ValueError, match="issuer does not match the signing key"):
+        sign(receipt, key)
+
+    signature = base64.b64encode(key._key.sign(canonical_bytes(receipt))).decode("ascii")
+    signed = receipt.model_copy(update={"signature": signature})
+    public_key = key.public_key_pem()
+    assert verify(signed, public_key) == VerificationResult(False, "issuer_mismatch")
+    assert _verify_json(signed.model_dump_json(), public_key, None) == VerificationResult(False, "issuer_mismatch")
 
 
 def test_unknown_version(fields: dict[str, Any], key: IssuerKey) -> None:

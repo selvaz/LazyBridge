@@ -36,7 +36,8 @@ Supply evidence as redacted metadata. Use repository-relative placeholders for
 folders and omit prompts, model output, file contents, environment values,
 tokens, and absolute home paths. The signature covers every field except
 `signature` using sorted JSON keys, UTF-8, and compact separators. The
-fingerprint is the hex SHA-256 digest of the raw public key.
+fingerprint is the hex SHA-256 digest of the raw public key. `sign` raises
+`ValueError` if the issuer fingerprint or key ID differs from the signing key.
 
 ## Verify a receipt
 
@@ -59,6 +60,7 @@ CLI prints the verification reason and exits `1`. In Python, use
 | --- | --- |
 | `bad_signature` | The supplied key could not authenticate the receipt. |
 | `unknown_version` | The signature is valid and the receipt version is unsupported. |
+| `issuer_mismatch` | The signed issuer fingerprint or key ID differs from the verification key. |
 | `review_head_mismatch` | The review refers to a different commit. |
 | `approval_head_mismatch` | The approval target refers to a different commit. |
 | `check_head_mismatch` | A required check refers to a different commit. |

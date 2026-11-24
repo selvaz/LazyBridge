@@ -6,7 +6,13 @@ from pathlib import Path
 from typing import Any
 
 from lazybridge.ext.receipt import PublicationReceipt, VerificationResult
-from lazybridge.ext.receipt.signing import _canonical_json, _signature_valid, _verify_claims, canonical_bytes
+from lazybridge.ext.receipt.signing import (
+    _canonical_json,
+    _load_public_key,
+    _signature_valid,
+    _verify_claims,
+    canonical_bytes,
+)
 
 
 def _unique_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -27,7 +33,8 @@ def _verify_json(data: str, public_key: bytes, expected_head_sha: str | None) ->
         return VerificationResult(False, "invalid_receipt")
 
     # Authenticate the wire fields before parsing them into a typed model.
-    if not _signature_valid(body, signature, public_key):
+    key = _load_public_key(public_key)
+    if key is None or not _signature_valid(body, signature, key):
         return VerificationResult(False, "bad_signature")
     if type(fields.get("receipt_version")) is not int or fields["receipt_version"] != 1:
         return VerificationResult(False, "unknown_version")
@@ -37,7 +44,7 @@ def _verify_json(data: str, public_key: bytes, expected_head_sha: str | None) ->
         return VerificationResult(False, "invalid_receipt")
     if body != canonical_bytes(receipt):
         return VerificationResult(False, "invalid_receipt")
-    return _verify_claims(receipt, expected_head_sha)
+    return _verify_claims(receipt, key, expected_head_sha)
 
 
 def main() -> int:
