@@ -124,6 +124,7 @@ class Agent:
     """
 
     _is_lazy_agent = True  # recognised by _wrap_tool()
+    _fresh_review = False  # set by policy.make_reviewer for isolated fallback reviewers
 
     def __init__(
         self,
@@ -495,6 +496,7 @@ class Agent:
                 if getattr(self, "reserve_review", False) or getattr(self, "budget_role", None)
                 else None,
                 work_units=getattr(self, "work_units", 1),
+                fresh=self._fresh_review,
             ),
             _guarded_output() if guard else nullcontext(),
         ):
@@ -851,6 +853,7 @@ class Agent:
             if getattr(self, "reserve_review", False) or getattr(self, "budget_role", None)
             else None,
             work_units=getattr(self, "work_units", 1),
+            fresh=self._fresh_review,
             bind=False,
         ) as invocation:
             gen = self._stream_scoped(task, images=images, audio=audio)

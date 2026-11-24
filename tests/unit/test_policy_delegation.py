@@ -3,16 +3,18 @@ from dataclasses import replace
 
 import pytest
 
-from lazybridge import Agent, Plan, Step
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, Memory, Plan, Session, Step, Store
 from lazybridge.envelope import Envelope
 from lazybridge.policy import (
     PolicyBudgetExceeded,
     PolicyDenied,
+    PolicyError,
     PolicyWidening,
     TaskGrant,
     TreeBudget,
     child_within_parent,
     current_policy_context,
+    make_reviewer,
     policy_scope,
     resolve,
 )
@@ -256,6 +258,108 @@ async def test_stream_holds_active_slot_until_closed(tmp_path):
             await other.run("x")
         await stream.aclose()
         assert (await other.run("x")).ok
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine_name", ["claude", "codex"])
+async def test_same_provider_review_verifier_uses_a_fresh_engine_and_isolated_state(tmp_path, monkeypatch, engine_name):
+    if engine_name == "claude":
+        writer_engine = ClaudeCodeEngine("sonnet", cwd=str(tmp_path), session_id="writer-session")
+        preferred_model, expected_model = "opus", "claude-opus-5-5"
+    else:
+        writer_engine = CodexEngine("sol", cwd=str(tmp_path), thread_id="writer-thread")
+        preferred_model, expected_model = "terra", "gpt-6.1-terra"
+
+    mode = "opposite-or-fresh"
+    available = {engine_name}
+    reviewer, independence = make_reviewer(writer_engine, available, mode, preferred_model=preferred_model)
+    assert independence == "same-provider-fresh"
+    assert type(reviewer.engine) is type(writer_engine)
+    assert reviewer.engine is not writer_engine
+    assert reviewer.engine.cwd == writer_engine.cwd
+    assert reviewer.engine.model == expected_model
+    assert reviewer.engine.session_alias is None
+    if engine_name == "claude":
+        assert reviewer.engine.session_id is None
+        assert reviewer.engine.session_mode == "memory"
+        assert not reviewer.engine.persist_session
+    else:
+        assert reviewer.engine.thread_id is None
+        assert not reviewer.engine.persist_thread
+
+    writer_session = Session()
+    writer_memory = Memory()
+    writer_memory.add("writer-only history", "writer-only answer")
+    writer_store = Store()
+    writer_store.write("blackboard", "writer-only work in progress")
+    blackboard = Tool(lambda: writer_store.read("blackboard"), name="blackboard")
+    seen = []
+
+    async def run(engine, env, *, tools, memory, session, **kwargs):
+        if engine is writer_engine:
+            assert session is writer_session
+            assert memory is writer_memory
+            assert tools == [blackboard]
+            return Envelope(payload="draft")
+        assert engine is reviewer.engine
+        assert session is reviewer.session
+        assert session is not writer_session
+        assert memory is None
+        assert not tools
+        assert "draft" in env.task
+        assert env.context is None
+        seen.append(current_policy_context().review_independence)
+        return Envelope(payload="approved")
+
+    monkeypatch.setattr(type(writer_engine), "run", run)
+    writer = Agent(
+        engine=writer_engine,
+        name="writer",
+        memory=writer_memory,
+        store=writer_store,
+        sources=["writer-only evidence"],
+        tools=[blackboard],
+        session=writer_session,
+        verify=reviewer,
+        reserve_review=True,
+    )
+    assert reviewer.store is None
+    assert not reviewer.sources
+    budget = TreeBudget(max_active_children=2, review_mode=mode, available_engines=available)
+    with policy_scope(None, tree_budget=budget):
+        assert (await writer.run("write")).text() == "draft"
+    assert seen == ["same-provider-fresh"]
+
+
+@pytest.mark.asyncio
+async def test_fresh_reviewer_can_stream_from_a_reserved_slot(monkeypatch):
+    mode = "opposite-or-fresh"
+    available = {"codex"}
+    writer_engine = CodexEngine("terra", thread_id="writer-thread")
+    reviewer, independence = make_reviewer(writer_engine, available, mode)
+    assert reviewer.engine.model == writer_engine.model
+
+    async def stream(engine, env, **kwargs):
+        assert current_policy_context().review_independence == independence
+        yield "review"
+
+    monkeypatch.setattr(CodexEngine, "stream", stream)
+    budget = TreeBudget(max_active_children=2, review_mode=mode, available_engines=available)
+    with (
+        policy_scope(None, tree_budget=budget),
+        policy_scope(None, child_id="writer", reserve_review=True, engine="codex"),
+    ):
+        assert [chunk async for chunk in reviewer.stream("review this")] == ["review"]
+
+
+def test_reviewer_factory_prefers_opposite_engine_and_rejects_a_duplicate_fallback_model():
+    writer = ClaudeCodeEngine("sonnet")
+    reviewer, independence = make_reviewer(writer, {"claude", "codex"}, "opposite-or-fresh")
+    assert isinstance(reviewer.engine, CodexEngine)
+    assert independence == "opposite-engine"
+
+    with pytest.raises(PolicyError, match="preferred reviewer model must differ"):
+        make_reviewer(writer, {"claude"}, "opposite-or-fresh", preferred_model="sonnet")
 
 
 @pytest.mark.asyncio
