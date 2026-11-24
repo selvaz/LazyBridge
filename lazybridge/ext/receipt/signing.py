@@ -56,10 +56,10 @@ class IssuerKey:
                 break
             except ValueError:
                 # Exclusive creation can expose an incomplete PEM to a concurrent reader.
-                header = b"-----BEGIN PRIVATE KEY-----"
-                incomplete = header.startswith(pem) or (
-                    pem.startswith(header) and b"-----END PRIVATE KEY-----" not in pem
-                )
+                label = b"PRIVATE KEY"
+                header = b"-----BEGIN " + label + b"-----"
+                footer = b"-----END " + label + b"-----"
+                incomplete = header.startswith(pem) or (pem.startswith(header) and footer not in pem)
                 if not incomplete or time.monotonic() >= deadline:
                     raise
                 time.sleep(0.01)
