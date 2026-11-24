@@ -13,6 +13,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Add a tree-wide delegation budget to the core policy: maximum depth, active and total children, work units, and a reserved review slot. (#261)
+- Add structured feedback and escalation tickets to the typed approval registry: an agent asks a named role for an answer (choice or text); feedback tickets cannot be decided or consumed as approvals and stay out of `list_pending_tickets`. (#265)
 - Make review independence configurable: an opposite-engine reviewer by default, with a fresh same-provider instance (no shared session, thread, or memory) as a fallback. The review record states the independence level. (#263)
 
 ### Fixed
