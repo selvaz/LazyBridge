@@ -66,6 +66,9 @@ otel      = ["opentelemetry-api>=1.20,<2.0", "opentelemetry-sdk>=1.20,<2.0"]
 # MultiFernet).  Opt-in because cryptography is a C-extension; the rest
 # of LazyBridge stays pure-Python by default.
 encryption = ["cryptography>=42,<51"]
+# Ed25519 signing and verification for publication receipts. Also covered by
+# the cryptography dependency in [all].
+receipt   = ["cryptography>=42,<51"]
 # Multi-line-aware docstring parsing for auto-derived tool schemas
 # (Google/NumPy/Sphinx, via the same library PydanticAI and the OpenAI
 # Agents SDK use). Imported lazily inside ToolSchemaBuilder; without it,
@@ -94,7 +97,7 @@ claude-code = [
 # the [test] extra makes ``pip install -e '.[test]'`` a one-step
 # bootstrap for newcomers. ``griffe`` is included so CI exercises the
 # multi-line docstring parsing path, not just its regex fallback.
-test      = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0", "pydantic>=2.0.0,<3.0.0", "pyyaml>=6.0,<7.0", "griffe>=1.0,<3.0"]
+test      = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0", "pydantic>=2.0.0,<3.0.0", "pyyaml>=6.0,<7.0", "griffe>=1.0,<3.0", "cryptography>=42,<51"]
 docs      = [
     "mkdocs-material>=9.5,<10.0",
     "mkdocstrings[python]>=0.24,<2.0",

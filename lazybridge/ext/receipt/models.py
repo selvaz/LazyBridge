@@ -1,8 +1,10 @@
 """Typed wire fields for version 1 publication receipts."""
 
-from typing import Literal
+from datetime import datetime, timedelta
+from typing import Literal, Self
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
 class _ReceiptModel(BaseModel):
@@ -109,3 +111,25 @@ class PublicationReceipt(_ReceiptModel):
     checks: list[CheckEvidence]
     outcome: Outcome
     signature: str = ""
+
+    @field_validator("receipt_id")
+    @classmethod
+    def _uuid4(cls, value: str) -> str:
+        if UUID(value).version != 4:
+            raise ValueError("receipt_id must be a UUID4")
+        return value
+
+    @field_validator("issued_at")
+    @classmethod
+    def _utc_timestamp(cls, value: str) -> str:
+        if datetime.fromisoformat(value).utcoffset() != timedelta(0):
+            raise ValueError("issued_at must be a UTC ISO-8601 timestamp")
+        return value
+
+    @model_validator(mode="after")
+    def _refusal_shape(self) -> Self:
+        if self.outcome.status == "refused" and (
+            self.publication.pr_number is not None or not self.outcome.refusal_reason
+        ):
+            raise ValueError("A refused receipt requires a null PR number and a refusal reason")
+        return self

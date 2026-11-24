@@ -15,6 +15,7 @@ from lazybridge.ext.receipt.models import (
     ReviewerEvidence,
     WriterEvidence,
 )
+from lazybridge.ext.receipt.signing import IssuerKey, VerificationResult, canonical_bytes, sign, verify
 
 __all__ = [
     "AdmissionEvidence",
@@ -23,11 +24,16 @@ __all__ = [
     "CheckEvidence",
     "DelegationEvidence",
     "Issuer",
+    "IssuerKey",
     "Outcome",
     "PolicyEvidence",
     "Publication",
     "PublicationReceipt",
     "Repository",
     "ReviewerEvidence",
+    "VerificationResult",
     "WriterEvidence",
+    "canonical_bytes",
+    "sign",
+    "verify",
 ]
