@@ -306,6 +306,74 @@ def _read_only_review_policy(parent: EffectivePolicy) -> EffectivePolicy:
     return child_within_parent(parent, request, profile="read", document=parent._document)
 
 
+def _narrower_path(parent: Path, child: Path) -> Path:
+    if child.is_relative_to(parent):
+        return child
+    if parent.is_relative_to(child):
+        return parent
+    raise PolicyWidening("tool agent and caller have disjoint policy paths")
+
+
+def _intersect_tool_policy(parent: EffectivePolicy, child: EffectivePolicy | TaskGrant) -> EffectivePolicy:
+    """Attenuate a configured tool agent to its caller's delegable grants."""
+    if isinstance(child, TaskGrant):
+        folder = Path(child.folder).expanduser().resolve()
+        child = _resolve(
+            parent.profile,
+            child,
+            parent._document,
+            parent=parent if folder.is_relative_to(parent.folder) else None,
+        )
+    routes = tuple(sorted(set(parent.network_routes) & set(child.network_routes)))
+    network = (
+        "on"
+        if parent.network == child.network == "on" and (routes or not (parent.network_routes or child.network_routes))
+        else "off"
+    )
+    tools = parent.tools & child.tools if network == "on" else frozenset()
+    servers = {}
+    for name, config in child.mcp_servers.items() if "mcp" in tools else ():
+        prior = parent.mcp_servers.get(name)
+        settings = {key: value for key, value in config.items() if key != "tools"}
+        if prior is not None and settings == {key: value for key, value in prior.items() if key != "tools"}:
+            shared = tuple(sorted(set(config["tools"]) & set(prior["tools"])))
+            if shared:
+                servers[name] = MappingProxyType({**settings, "tools": shared})
+    inventory = {
+        name: tuple(
+            sorted(set(parent.mcp_inventory_tools.get(name, ())) | set(child.mcp_inventory_tools.get(name, ())))
+        )
+        for name in sorted(set(parent.mcp_inventory) | set(child.mcp_inventory))
+    }
+    held = {card.card_id: card for card in parent.approval_cards}
+    cards = []
+    for card in child.approval_cards:
+        source = held.get(card.provenance[-1]) if card.provenance else None
+        if source is None:
+            continue
+        try:
+            validate_card_copy(source, card)
+        except PolicyWidening:
+            continue
+        cards.append(card)
+    effective = replace(
+        child,
+        folder=_narrower_path(parent.folder, child.folder),
+        scratch_folder=_narrower_path(parent.scratch_folder, child.scratch_folder),
+        tool_classes=parent.tool_classes & child.tool_classes,
+        tools=tools,
+        network=network,
+        network_routes=routes if network == "on" else (),
+        mcp_servers=MappingProxyType(servers),
+        mcp_inventory=tuple(inventory),
+        mcp_inventory_tools=MappingProxyType(inventory),
+        approval_authority=parent.approval_authority & child.approval_authority,
+        approval_cards=tuple(cards),
+    )
+    validate_child_policy(parent, effective)
+    return _with_policy_digest(effective)
+
+
 def validate_child_policy(parent: EffectivePolicy, child: EffectivePolicy) -> None:
     """Reject expansions in a resolved child, regardless of how it was supplied."""
     if (child.version, child.revision) != (parent.version, parent.revision):

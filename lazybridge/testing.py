@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import time
+import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -214,6 +215,7 @@ class MockAgent:
         self.timeout: float | None = None
         self.fallback: Any | None = None
         self.policy = policy
+        self._policy_agent_id = uuid.uuid4().hex
         self.tree_budget = tree_budget
         self.reserve_review = reserve_review
         self.budget_role = budget_role
@@ -237,9 +239,9 @@ class MockAgent:
     # ------------------------------------------------------------------
 
     async def run(self, task: str | Envelope) -> Envelope:
-        from lazybridge.policy.context import policy_scope
+        from lazybridge.policy.context import _policy_scope
 
-        with policy_scope(
+        with _policy_scope(
             self.policy,
             tree_budget=self.tree_budget,
             child_id=self,
@@ -247,11 +249,20 @@ class MockAgent:
             role=self.budget_role,
             engine=self.budget_engine,
             work_units=self.work_units,
+            approval_actor=self.name,
+            agent_id=self._policy_agent_id,
+            session=getattr(self, "session", None),
         ):
             return await self._run_body(task)
 
     async def _run_as_tool(self, task: str | Envelope) -> Envelope:
         return await self.run(task)
+
+    async def _run_as_delegated_tool(self, task: str | Envelope) -> Envelope:
+        from lazybridge.policy.context import _agent_tool_call
+
+        with _agent_tool_call(self):
+            return await self._run_as_tool(task)
 
     async def _run_body(self, task: str | Envelope) -> Envelope:
         env_in = self._to_envelope(task)
@@ -299,7 +310,9 @@ class MockAgent:
         env = await self.run(task)
         yield env.text()
 
-    def as_tool(self, name: str | None = None, description: str | None = None) -> Any:
+    def as_tool(
+        self, name: str | None = None, description: str | None = None, *, policy_grant: str | None = None
+    ) -> Any:
         from lazybridge.tools import Tool
 
         agent = self
@@ -307,7 +320,7 @@ class MockAgent:
         effective_desc = description or self.description or f"Run the {effective_name} mock agent."
 
         async def _run(task: str) -> Envelope:
-            return await agent.run(task)
+            return await agent._run_as_delegated_tool(task)
 
         _run.__name__ = effective_name
         _run.__doc__ = effective_desc
@@ -317,6 +330,7 @@ class MockAgent:
             description=effective_desc,
             mode="signature",
             returns_envelope=True,
+            policy_grant=policy_grant,
         )
 
     def definition(self) -> Any:

@@ -24,96 +24,131 @@ The built-in class names are `command`, `cleanup`, `run_tests`, `local_commit`,
 with `ApprovalQueue(action_tiers=...)`. Unclassified actions require the
 external tier. The registry rejects tiers below a configured class's minimum.
 
-Pass the requester's trusted `PolicyContext` to `create_typed_ticket` for a
-manual-only flow, or to `submit_typed_request` to try a card first. Both use the
-invocation ancestry recorded by `policy_scope`. The request's `requested_by`
-must equal the invocation's `actor`. The actor defaults to its invocation ID.
-A trusted caller can bind a stable principal with `approval_actor` when opening
-the scope.
+Pass the current requester's `PolicyContext` to `create_typed_ticket` for a
+manual flow or `submit_typed_request` to try a card first. The request's
+`requested_by` must equal the active invocation's `actor`. Agent names and
+the optional `approval_actor` label on low-level scopes are used for display
+and audit. Nested low-level scopes retain the enclosing agent's identity.
+The ticket's requester path and route contain invocation IDs and policy
+digests. They carry no credentials.
 
-For example, a test runner can request approval from its parent.
+An ancestor uses the credential of its active invocation. For example, after
+a test runner files a ticket, its coordinator resumes and decides it.
 
 ```python
 from pathlib import Path
 
-from lazybridge import Store
-from lazybridge.ext.approval import ApprovalQueue, ApprovalTarget, ApproverContext, TypedApprovalRequest
-from lazybridge.policy import TaskGrant, current_policy_context, policy_scope, resolve
-
-
-def authenticate_approver() -> ApproverContext | None:
-    # The host binds the active invocation through its trusted dispatcher.
-    context = current_policy_context()
-    return ApproverContext.from_invocation(context) if context is not None else None
-
+from lazybridge import Agent, Envelope, Store
+from lazybridge.ext.approval import ApprovalQueue, ApprovalTarget, TypedApprovalRequest
+from lazybridge.policy import TaskGrant, current_approver_credential, current_policy_context, policy_scope, resolve
 
 folder = Path.cwd()
-queue = ApprovalQueue(Store(), authenticate_approver=authenticate_approver)
+queue = ApprovalQueue(Store())
 parent_policy = resolve(
     "edit-and-run",
-    TaskGrant(folder, {"tool_classes": ["shell"]}, "off", "local",
-              approval_authority=frozenset({"run_tests"})),
+    TaskGrant(
+        folder, {"tool_classes": ["shell"]}, "off", "local",
+        approval_authority=frozenset({"run_tests"}),
+    ),
 )
-with policy_scope(parent_policy, approval_actor="coordinator") as parent:
-    assert parent is not None
-    with policy_scope(TaskGrant(folder, {"tool_classes": ["shell"]}, "off", "local")) as runner:
-        assert runner is not None
+
+
+class TestRunner:
+    async def run(self, env, **kwargs):
+        context = current_policy_context()
+        assert context is not None
         request = TypedApprovalRequest.create(
             task_id="verify-release",
             attempt=1,
-            action="run unit tests",
+            action=env.task,
             target=ApprovalTarget(path="tests"),
-            requested_by=runner.actor,
+            requested_by=context.actor,
             policy_revision=parent_policy.revision,
             tier="routine",
             action_class="run_tests",
         )
-        ticket = queue.create_typed_ticket(request, requester=runner)
-    assert queue.decide_typed_ticket(
-        ticket.approval_id,
-        approver=ApproverContext.from_invocation(parent),
-        verdict="approved",
-    )
+        ticket = queue.create_typed_ticket(request, requester=context)
+        return Envelope(payload=ticket.approval_id)
+
+
+runner = Agent(engine=TestRunner(), name="runner")
+with policy_scope(parent_policy, approval_actor="coordinator"):
+    result = runner("run unit tests")
+    assert result.ok
+    credential = current_approver_credential()
+    assert credential is not None
+    assert queue.decide_typed_ticket(result.text(), credential=credential, verdict="approved")
 ```
 
 Use `route_ticket(ticket)` to inspect the assigned grant and
-`list_pending_tickets(assignee=context)` to filter work by assignee. Configure
-`ApprovalQueue(authenticate_approver=...)` with a zero-argument callback that
-returns the current caller's `ApproverContext` from trusted session or
-invocation state, or `None` for an unauthenticated caller. Keep queue setup
-and authentication state under host control. The callback must source the
-actor, role, invocation ID, and policy digest from that state independently of
-request parameters and ticket data.
+`list_pending_tickets(assignee=context)` to filter work by routing identity.
+Use `escalate(approval_id, summary, credential=credential)` to forward a
+pending ticket from its current assignee. Each manual or timeout hop records
+its reason, destination, and a summary with what, why, risk, and alternatives.
+The default per-hop timeout is five minutes. Reading, listing, or deciding a
+due ticket applies the timeout. The ticket's original expiry still applies.
+The decision records the approver and the grant used. Call
+`consume_typed_ticket` with the authenticated executor and original request
+bindings immediately before carrying out an approved effect.
 
-Decisions and manual forwarding require the supplied `approver` to match the
-authenticated context. The registry refuses these operations when authentication
-is unavailable. For ancestor decisions, it checks the authenticated actor,
-invocation ID, and effective policy digest against the current grant. For owner
-decisions, it checks the configured `owner_actor` and authenticated `owner`
-role. To designate an independent
-approver, configure `independent_approvers` with an external action class and
-the approver's authenticated actor. That actor must be outside the requester
-chain. The owner is the final fallback. If the owner made the request and
-there is nobody else eligible, the ticket stays unassigned.
+## Provision operator credentials
 
-Typed tickets with a tier or action class require a requester invocation.
-Unclassified typed tickets without an invocation path, including historical
-tickets, can be decided only by the authenticated owner. The requester remains
-ineligible even if they are the owner.
+Provision owner and independent approver credentials outside agent execution.
+The operator CLI prints the secret once and stores its hash with the principal
+and roles in the registry. For example, for the default owner on the default
+queue prefix, run
 
-An approver can forward a pending ticket with
-`escalate(approval_id, summary, approver=context)`. An `EscalationSummary`
-carries what is requested, why, the risk, and the alternatives considered.
-Each forwarding or timeout moves to the next eligible approver and preserves
-the prior hops. The default per-hop timeout is five minutes. Reading, listing,
-or deciding a due ticket applies its timeout automatically. The original ticket
-expiry still applies. The final decision records the actor and grant used.
-With a manual approval, call `consume_typed_ticket` with the authenticated
-executor and the original request bindings immediately before the effect.
+```sh
+python -m lazybridge.ext.approval --db approvals.sqlite issue-approver-credential owner --role owner
+```
+
+Use `--prefix` for a custom queue prefix. From host Python, use
+`ApprovalQueue(store, allow_credential_issuance=True)` and call
+`issue_approver_credential(principal, roles)`. Keep that handle and write
+access to the backing registry under operator control. Give agents the
+default queue with issuance disabled. Keep owner and independent credentials
+out of agent contexts, tool arguments, and logs. The core prevents
+self-approval through the public API under this boundary. In-process code
+holding the owner's credential acts as the owner.
+
+Set `owner_actor` to the owner principal. For an independent external
+approver, map the action class to the principal in `independent_approvers`
+and issue that principal a credential with the `independent` role. A route
+can use that principal when it is outside the requester chain. Tickets
+without a requester path go to the owner, including historical unclassified
+tickets. When the owner is the requester and nobody else is eligible, the
+ticket remains unassigned.
+
+## Pool calls and service agents
+
+Ordinary agent tools and pool routes apply the intersection of the caller's
+delegable policy and the callee's configuration at every hop. Expose these
+tools to a policy-enabled caller with an explicit grant, such as
+`agent.as_tool(policy_grant="read")` or `pool.as_tool(policy_grant="read")`.
+The callee keeps only
+configured cards that are valid transfers from the caller's hand. In a cycle,
+the returning invocation keeps the same agent identity but receives a new
+invocation ID. Routing skips every ancestor with the requester's agent
+identity. A configured `TreeBudget` charges each tool or pool hop against
+its depth, child, and work limits. A reserved review requires a separate agent
+identity and session from the writer.
+
+When a callee needs its full configured policy, register it as a
+`ServiceAgent(queue, agent, action_class=..., tier=...)` in the host. Give the
+caller access to the service's request operation. From inside an invocation,
+`service.request(task, task_id=...)` files a typed ticket for the exact task
+and service policy. The tier routes the ticket through the ordinary approval
+rules. After an eligible approver decides, the host calls
+`await service.execute(ticket.approval_id)` from outside the caller's
+invocation. The registry consumes the approval atomically before dispatch.
+The service starts a separate invocation with its configured policy. The
+ticket records the requester, the decision records the approver, and the
+effect outcome records the service that ran. The task is visible in the
+ticket prompt, so pass any service secrets through its host configuration.
 
 ## Issue and specialise cards
 
-The owner issues an original with `issue_card`. A matcher holds a fixed
+The owner issues an original with `issue_card(credential=..., ...)`. A matcher holds a fixed
 executable and subcommand prefix, optional exact trailing arguments, optional
 branch and path prefix, and the required network state. Cards can carry a task
 scope, project scope, expiry, maximum uses, and the right to transfer. Add

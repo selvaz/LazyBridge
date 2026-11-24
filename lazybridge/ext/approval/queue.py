@@ -63,8 +63,9 @@ import json
 import logging
 import os
 import re
+import secrets
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -80,8 +81,11 @@ from lazybridge.policy import (
     CardTier,
     PolicyContext,
     PolicyWidening,
+    current_approver_credential,
+    current_policy_context,
 )
 from lazybridge.policy.cards import card_action_paths
+from lazybridge.policy.context import _require_operator_context
 
 from .cards import CardApproval, CardProposal, CardTemplate, _CardRegistry
 from .routing import (
@@ -134,6 +138,16 @@ class ApprovalTarget(BaseModel):
     path: str | None = None
 
 
+class ServiceCall(BaseModel):
+    """The configured service and exact input bound to an approval."""
+
+    model_config = ConfigDict(frozen=True)
+
+    agent: str
+    policy_digest: str
+    task_digest: str
+
+
 class TypedApprovalRequest(BaseModel):
     """Canonical, task-bound request used for governed effects."""
 
@@ -150,6 +164,7 @@ class TypedApprovalRequest(BaseModel):
     tier: ApprovalTier | None = None
     action_class: str | None = Field(default=None, min_length=1)
     card_action: CardAction | None = None
+    service_call: ServiceCall | None = None
 
     @classmethod
     def create(cls, **values: Any) -> TypedApprovalRequest:
@@ -158,7 +173,9 @@ class TypedApprovalRequest(BaseModel):
         return provisional.model_copy(update={"digest": provisional.canonical_digest()})
 
     def canonical_digest(self) -> str:
-        optional = {name for name in ("tier", "action_class", "card_action") if getattr(self, name) is None}
+        optional = {
+            name for name in ("tier", "action_class", "card_action", "service_call") if getattr(self, name) is None
+        }
         return _canonical_digest(self, exclude=optional)
 
 
@@ -336,6 +353,7 @@ class ApprovalTicket(BaseModel):
     tier: ApprovalTier | None = None
     action_class: str | None = None
     requester_path: tuple[str, ...] = ()
+    requester_agent_id: str | None = None
     route: ApprovalRoute | None = None
     card_proposal: CardProposal | None = None
     proposal_fingerprint: str | None = None
@@ -635,9 +653,9 @@ class ApprovalQueue:
     per prefix a caller needs; the object itself holds no connection of its
     own beyond the ``Store`` it's given, so constructing one is cheap.
 
-    For typed decisions and manual escalation, ``authenticate_approver``
-    resolves the current caller from trusted transport state. It takes no
-    arguments and returns ``None`` when the caller is unauthenticated.
+    Typed decisions and manual escalation require an approver credential.
+    Only a host queue explicitly enabled for provisioning can issue operator
+    credentials. Give agents a separate queue with the default configuration.
 
     ``prefix`` matching is a literal string prefix (same semantics as
     :meth:`Store.items`'s own ``prefix=``), NOT a namespace boundary: a
@@ -666,7 +684,7 @@ class ApprovalQueue:
         denial_prefix: str = DEFAULT_DENIAL_PREFIX,
         notify_failure_prefix: str = DEFAULT_NOTIFY_FAILURE_PREFIX,
         clock: Callable[[], datetime] | None = None,
-        authenticate_approver: Callable[[], ApproverContext | None] | None = None,
+        allow_credential_issuance: bool = False,
         owner_actor: str = "owner",
         independent_approvers: Mapping[str, str] | None = None,
         action_tiers: Mapping[str, ApprovalTier] | None = None,
@@ -677,9 +695,8 @@ class ApprovalQueue:
         self._denial_prefix = denial_prefix
         self._notify_failure_prefix = notify_failure_prefix
         self._clock = clock or (lambda: datetime.now(UTC))
-        # Resolve the caller from trusted transport state, independently of
-        # any identity fields supplied with a decision or escalation.
-        self._authenticate_approver = authenticate_approver
+        self._allow_credential_issuance = allow_credential_issuance
+        self._credential_prefix = f"approval-credentials:{prefix.encode().hex()}:"
         if not owner_actor.strip() or escalation_timeout <= timedelta(0):
             raise ValueError("routing requires an owner and a positive escalation timeout")
         self._owner = owner_actor
@@ -721,6 +738,8 @@ class ApprovalQueue:
         the original request supplied by the caller.
         """
         request = self._validate_typed_request(request, ttl=ttl, requester=requester)
+        if request.service_call is not None:
+            raise ValueError("file service requests through the configured service agent")
         return self._file_typed_ticket(
             request,
             prompt=prompt,
@@ -746,17 +765,24 @@ class ApprovalQueue:
             raise ValueError("request digest does not match canonical request")
         if ttl <= timedelta(0):
             raise ValueError(f"ttl must be positive, got {ttl}")
-        if requester is None:
-            if request.tier is not None or request.action_class is not None or request.card_action is not None:
-                raise ValueError("routed requests require a trusted requester invocation")
-        elif (
-            request.requested_by != requester.actor
-            or not request.action.strip()
+        if requester is not None and (
+            requester is not current_policy_context() or request.requested_by != requester.actor
+        ):
+            raise ValueError("requester must be the active invocation")
+        if (
+            requester is not None
+            or request.tier is not None
+            or request.action_class is not None
+            or request.card_action is not None
+        ) and (
+            not request.action.strip()
             or request.tier is None
             or request.action_class is None
             or not self._tier_at_least(request.tier, self._action_tiers.get(request.action_class, "external"))
         ):
             raise ValueError("requester identity, action class and tier must agree with the routing policy")
+        if requester is None and request.card_action is not None:
+            raise ValueError("card requests require an active invocation")
         return request
 
     @staticmethod
@@ -782,19 +808,19 @@ class ApprovalQueue:
     ) -> ApprovalTicket:
         now = self._now()
         chain = invocation_chain(requester) if requester is not None else ()
-        route = None
+        route = build_route(
+            chain,
+            requested_by=request.requested_by,
+            tier=request.tier or "external",
+            action_class=request.action_class or "unclassified",
+            owner=self._owner,
+            independent=self._independent.get(request.action_class) if request.action_class else None,
+            operator_only=operator_only,
+            now=now,
+            timeout=self._escalation_timeout,
+        )
         proposal = None
-        if requester is not None and request.tier is not None and request.action_class is not None:
-            route = build_route(
-                chain,
-                tier=request.tier,
-                action_class=request.action_class,
-                owner=self._owner,
-                independent=self._independent.get(request.action_class),
-                operator_only=operator_only,
-                now=now,
-                timeout=self._escalation_timeout,
-            )
+        if request.tier is not None and request.action_class is not None:
             action = request.card_action
             if len(chain) > 1 and not operator_only and request.tier != "external" and action is not None and paths:
                 proposal = CardProposal(
@@ -826,6 +852,7 @@ class ApprovalQueue:
             tier=request.tier,
             action_class=request.action_class,
             requester_path=tuple(context.invocation_id for context in chain),
+            requester_agent_id=requester.agent_id if requester is not None else None,
             route=route,
             card_proposal=proposal,
             proposal_fingerprint=_canonical_digest(request, exclude={"attempt"}) if proposal else None,
@@ -845,6 +872,8 @@ class ApprovalQueue:
     ) -> CardApproval | ApprovalTicket:
         """Spend a matching card and record its use, or file a routed ticket."""
         request = self._validate_typed_request(request, ttl=ttl, requester=requester)
+        if request.service_call is not None:
+            raise ValueError("file service requests through the configured service agent")
         paths = self._card_paths(request, requester)
         if not operator_only and paths and request.card_action and request.action_class and request.tier:
             approved = self._cards.approve(
@@ -870,13 +899,47 @@ class ApprovalQueue:
         )
 
     def _is_owner(self, approver: ApproverContext) -> bool:
-        return approver.actor == self._owner and approver.role == "owner"
+        return (
+            approver.invocation_id is None
+            and approver.actor == self._owner
+            and (approver.role == "owner" or "owner" in approver.roles)
+        )
 
-    def _authenticated_approver(self, claimed: ApproverContext) -> ApproverContext | None:
-        if self._authenticate_approver is None or (principal := self._authenticate_approver()) is None:
+    def issue_approver_credential(self, principal: str, roles: Collection[str]) -> str:
+        """Provision a bearer secret once through the host's operator queue."""
+        _require_operator_context()
+        if not self._allow_credential_issuance:
+            raise PermissionError("credential issuance is disabled for this queue")
+        if not principal.strip() or isinstance(roles, str) or any(not role.strip() for role in roles):
+            raise ValueError("a credential requires a nonblank principal and nonblank role names")
+        record = {"principal": principal, "roles": sorted(set(roles))}
+        with self._anchored() as anchored:
+            while True:
+                secret = secrets.token_urlsafe(32)
+                if anchored.compare_and_swap(self._credential_prefix + _hash_prompt(secret), None, record):
+                    return secret
+
+    def _authenticated_approver(self, credential: str) -> ApproverContext | None:
+        if not isinstance(credential, str) or len(credential) != 43 or not credential.isascii():
             return None
-        principal = ApproverContext.model_validate(principal)
-        return principal if principal == ApproverContext.model_validate(claimed) else None
+        context = current_policy_context()
+        active_credential = current_approver_credential()
+        if (
+            context is not None
+            and active_credential is not None
+            and secrets.compare_digest(credential, active_credential)
+        ):
+            return ApproverContext.from_invocation(context)
+        with self._anchored() as anchored:
+            record = anchored.read(self._credential_prefix + _hash_prompt(credential))
+        if record is None:
+            return None
+        return ApproverContext(actor=record["principal"], roles=record["roles"])
+
+    def _require_owner(self, credential: str) -> None:
+        principal = self._authenticated_approver(credential)
+        if principal is None or not self._is_owner(principal):
+            raise PermissionError("operation requires an owner credential")
 
     def _can_act(self, approver: ApproverContext, grant: ApprovalGrantUse | None) -> bool:
         if grant is None or grant.actor != approver.actor:
@@ -884,18 +947,23 @@ class ApprovalQueue:
         if grant.source == "owner":
             return self._is_owner(approver)
         if grant.source == "independent":
-            return self._independent.get(grant.action_class) == approver.actor
+            return (
+                approver.invocation_id is None
+                and self._independent.get(grant.action_class) == approver.actor
+                and (approver.role == "independent" or "independent" in approver.roles)
+            )
         return (
             grant.invocation_id is not None
             and grant.policy_digest is not None
             and approver.invocation_id == grant.invocation_id
             and approver.policy_digest == grant.policy_digest
+            and (grant.agent_id is None or approver.agent_id == grant.agent_id)
         )
 
     def issue_card(
         self,
         *,
-        issuer: ApproverContext,
+        credential: str,
         action_class: str,
         tier: CardTier,
         matcher: CardMatcher,
@@ -906,8 +974,7 @@ class ApprovalQueue:
         transferable: bool = False,
     ) -> ApprovalCard:
         """Register an original card issued by the authenticated owner."""
-        if not self._is_owner(issuer):
-            raise PermissionError("only the owner can issue original approval cards")
+        self._require_owner(credential)
         if not self._tier_at_least(tier, self._action_tiers.get(action_class, "external")):
             raise ValueError("card tier is below the action class")
         return self._cards.issue(
@@ -962,16 +1029,14 @@ class ApprovalQueue:
         )
         return self._cards.copy(source, child)
 
-    def revoke_card(self, card_id: str, *, issuer: ApproverContext) -> bool:
+    def revoke_card(self, card_id: str, *, credential: str) -> bool:
         """Revoke a card and, through its provenance, every downstream copy."""
-        if not self._is_owner(issuer):
-            raise PermissionError("only the owner can revoke approval cards")
+        self._require_owner(credential)
         return self._cards.revoke(card_id)
 
-    def set_card_template(self, name: CardTemplate, card_ids: tuple[str, ...], *, issuer: ApproverContext) -> None:
+    def set_card_template(self, name: CardTemplate, card_ids: tuple[str, ...], *, credential: str) -> None:
         """Set the original cards selected for a coder, reviewer or researcher hand."""
-        if not self._is_owner(issuer):
-            raise PermissionError("only the owner can set approval card templates")
+        self._require_owner(credential)
         if name not in ("coder", "reviewer", "researcher"):
             raise ValueError("unknown approval card template")
         self._cards.set_template(name, card_ids)
@@ -1084,14 +1149,13 @@ class ApprovalQueue:
         self,
         approval_id: str,
         *,
-        approver: ApproverContext,
+        credential: str,
         verdict: ApprovalVerdict,
-        actor: str | None = None,
         reason: str | None = None,
     ) -> bool:
-        """Decide a typed ticket as the caller resolved by ``authenticate_approver``."""
-        principal = self._authenticated_approver(approver)
-        if principal is None or (actor is not None and actor != principal.actor):
+        """Decide a typed ticket as the principal bound to the credential."""
+        principal = self._authenticated_approver(credential)
+        if principal is None:
             return False
         key = self._key(approval_id)
         with self._anchored() as anchored:
@@ -1117,11 +1181,19 @@ class ApprovalQueue:
         self, ticket: ApprovalTicket, approver: ApproverContext, grant: ApprovalGrantUse | None
     ) -> bool:
         request = ticket.request
-        if request is None or request.requested_by == approver.actor:
+        if request is None:
+            return False
+        if approver.invocation_id is None or ticket.requester_agent_id is None:
+            if request.requested_by == approver.actor:
+                return False
+        elif approver.agent_id == ticket.requester_agent_id:
             return False
         if not ticket.requester_path:
-            # Unclassified typed requests (including historical records) are owner-only.
-            return ticket.route is None and request.tier is None and self._is_owner(approver)
+            # Historical, unclassified requests have no explicit owner hop.
+            return self._is_owner(approver) and (
+                (ticket.route is None and request.tier is None)
+                or (grant is not None and grant.source == "owner" and self._can_act(approver, grant))
+            )
         if (
             request.tier is None
             or grant is None
@@ -1139,9 +1211,9 @@ class ApprovalQueue:
         eligible = ticket.requester_path[: -2 if request.tier == "sensitive" else -1]
         return grant.source == "policy" and grant.invocation_id in eligible
 
-    def escalate(self, approval_id: str, summary: EscalationSummary, *, approver: ApproverContext) -> bool:
+    def escalate(self, approval_id: str, summary: EscalationSummary, *, credential: str) -> bool:
         """Forward a pending ticket as its authenticated current assignee."""
-        principal = self._authenticated_approver(approver)
+        principal = self._authenticated_approver(credential)
         if principal is None:
             return False
         summary = EscalationSummary.model_validate(summary)
@@ -1207,6 +1279,11 @@ class ApprovalQueue:
 
     def consume_typed_ticket(self, approval_id: str, *, executor: ExecutorContext) -> bool:
         """Atomically consume an approval bound to its task, attempt and digest."""
+        return self._consume_typed_ticket(approval_id, executor=executor)
+
+    def _consume_typed_ticket(
+        self, approval_id: str, *, executor: ExecutorContext, service_call: ServiceCall | None = None
+    ) -> bool:
         executor = ExecutorContext.model_validate(executor)
         key = self._key(approval_id)
         with self._anchored() as anchored:
@@ -1218,6 +1295,7 @@ class ApprovalQueue:
             now = self._now()
             if (
                 request is None
+                or request.service_call != service_call
                 or ticket.status != "approved"
                 or ticket.decision is None
                 or ticket.decision.verdict != "approved"
@@ -1235,6 +1313,17 @@ class ApprovalQueue:
         self, approval_id: str, *, executor: ExecutorContext, succeeded: bool, detail: str | None = None
     ) -> bool:
         """Record the effect result once, only for the executor that consumed it."""
+        return self._record_effect_outcome(approval_id, executor=executor, succeeded=succeeded, detail=detail)
+
+    def _record_effect_outcome(
+        self,
+        approval_id: str,
+        *,
+        executor: ExecutorContext,
+        succeeded: bool,
+        detail: str | None = None,
+        service_call: ServiceCall | None = None,
+    ) -> bool:
         executor = ExecutorContext.model_validate(executor)
         key = self._key(approval_id)
         with self._anchored() as anchored:
@@ -1245,6 +1334,7 @@ class ApprovalQueue:
             request = ticket.request
             if (
                 request is None
+                or request.service_call != service_call
                 or ticket.consumed_at is None
                 or ticket.effect_outcome is not None
                 or not _request_matches_executor(request, executor)
@@ -1252,7 +1342,10 @@ class ApprovalQueue:
             ):
                 return False
             outcome = ApprovalEffectOutcome(
-                executor=executor.actor, recorded_at=self._now(), succeeded=succeeded, detail=detail
+                executor=service_call.agent if service_call else executor.actor,
+                recorded_at=self._now(),
+                succeeded=succeeded,
+                detail=detail,
             )
             updated = ticket.model_copy(update={"effect_outcome": outcome})
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))

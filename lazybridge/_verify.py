@@ -170,9 +170,19 @@ async def verify_with_retry(
     unrecognised verdict are treated as rejection (fail-safe).
     """
     from lazybridge.envelope import Envelope
+    from lazybridge.policy import PolicyError, current_policy_context
 
     if max_verify < 1:
         raise ValueError(f"max_verify must be >= 1, got {max_verify!r}")
+    if current_policy_context() is not None and getattr(verify_agent, "_is_lazy_agent", False):
+        writer_id = getattr(agent, "_policy_agent_id", None)
+        writer_session = getattr(agent, "session", None)
+        if (
+            verify_agent is agent
+            or (writer_id is not None and writer_id == getattr(verify_agent, "_policy_agent_id", None))
+            or (writer_session is not None and writer_session is getattr(verify_agent, "session", None))
+        ):
+            raise PolicyError("reviewer must use a different agent and session from the writer")
 
     original_task = getattr(env, "task", None) or ""
     original_context = getattr(env, "context", None)

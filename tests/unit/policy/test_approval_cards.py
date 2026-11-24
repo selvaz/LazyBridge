@@ -30,8 +30,6 @@ from lazybridge.policy import (
     resolve,
 )
 
-OWNER = ApproverContext(actor="owner", role="owner")
-
 
 class Clock:
     now = datetime(2026, 11, 24, tzinfo=UTC)
@@ -80,9 +78,12 @@ def cleanup(*argv: str, paths: tuple[Path, ...] = (Path("scratch/item"),)) -> Ca
 def test_a9_standing_cleanup_matches_only_a_single_in_folder_command(tmp_path: Path) -> None:
     folder = tmp_path / "worktree"
     folder.mkdir()
-    queue = ApprovalQueue(Store())
+    store = Store()
+    queue = ApprovalQueue(store)
+    owner_credential = ApprovalQueue(store, allow_credential_issuance=True)
+    credential = owner_credential.issue_approver_credential("owner", {"owner"})
     original = queue.issue_card(
-        issuer=OWNER,
+        credential=credential,
         action_class="cleanup",
         tier="routine",
         matcher=CardMatcher(command=("rm",), path_prefix=folder / "scratch"),
@@ -133,7 +134,7 @@ def test_a9_standing_cleanup_matches_only_a_single_in_folder_command(tmp_path: P
 
     with pytest.raises(ValueError, match="tier"):
         queue.issue_card(
-            issuer=OWNER, action_class="publish_pr", tier="routine", matcher=CardMatcher(command=("gh", "pr"))
+            credential=credential, action_class="publish_pr", tier="routine", matcher=CardMatcher(command=("gh", "pr"))
         )
     with pytest.raises(ValidationError, match=r"routine.*sensitive"):
         ApprovalCard.model_validate(
@@ -175,8 +176,10 @@ def test_a11_revocation_cascades_two_levels_and_nontransferable_stops_delegation
     clock = Clock()
     store = Store(db=str(tmp_path / "approvals.db"))
     queue = ApprovalQueue(store, clock=clock)
+    owner_credential = ApprovalQueue(store, allow_credential_issuance=True)
+    credential = owner_credential.issue_approver_credential("owner", {"owner"})
     original = queue.issue_card(
-        issuer=OWNER,
+        credential=credential,
         action_class="cleanup",
         tier="routine",
         matcher=CardMatcher(command=("rm",), path_prefix=tmp_path / "scratch"),
@@ -200,16 +203,19 @@ def test_a11_revocation_cascades_two_levels_and_nontransferable_stops_delegation
                     queue.copy_card(leaf.card_id, holder=sub_worker)
                 req = request(sub_worker, cleanup())
                 assert isinstance(queue.submit_typed_request(req, requester=sub_worker), CardApproval)
-                assert ApprovalQueue(store, clock=clock).revoke_card(original.card_id, issuer=OWNER)
+                assert ApprovalQueue(store, clock=clock).revoke_card(original.card_id, credential=credential)
                 assert isinstance(queue.submit_typed_request(req, requester=sub_worker), ApprovalTicket)
             assert isinstance(queue.submit_typed_request(request(worker, cleanup()), requester=worker), ApprovalTicket)
 
 
 def test_a12_class_card_specialisation_checks_branch_path_uses_and_expiry(tmp_path: Path) -> None:
     clock = Clock()
-    queue = ApprovalQueue(Store(), clock=clock)
+    store = Store()
+    queue = ApprovalQueue(store, clock=clock)
+    owner_credential = ApprovalQueue(store, allow_credential_issuance=True)
+    credential = owner_credential.issue_approver_credential("owner", {"owner"})
     original = queue.issue_card(
-        issuer=OWNER,
+        credential=credential,
         action_class="local_commit",
         tier="routine",
         matcher=CardMatcher(command=("git", "commit"), path_prefix=tmp_path),
@@ -273,10 +279,15 @@ def test_a12_class_card_specialisation_checks_branch_path_uses_and_expiry(tmp_pa
 def test_cards_respect_the_execution_ceiling_and_symlinks(tmp_path: Path) -> None:
     folder = tmp_path / "worktree"
     folder.mkdir()
-    queue = ApprovalQueue(Store())
-    off = queue.issue_card(issuer=OWNER, action_class="cleanup", tier="routine", matcher=CardMatcher(command=("rm",)))
+    store = Store()
+    queue = ApprovalQueue(store)
+    owner_credential = ApprovalQueue(store, allow_credential_issuance=True)
+    credential = owner_credential.issue_approver_credential("owner", {"owner"})
+    off = queue.issue_card(
+        credential=credential, action_class="cleanup", tier="routine", matcher=CardMatcher(command=("rm",))
+    )
     on = queue.issue_card(
-        issuer=OWNER,
+        credential=credential,
         action_class="package_install",
         tier="sensitive",
         matcher=CardMatcher(command=("pip", "install"), network="on"),
@@ -311,16 +322,17 @@ def test_cards_respect_the_execution_ceiling_and_symlinks(tmp_path: Path) -> Non
 
 
 def test_owner_templates_copy_held_cards_and_child_without_grant_inherits_no_cards(tmp_path: Path) -> None:
-    queue = ApprovalQueue(Store())
+    store = Store()
+    queue = ApprovalQueue(store)
+    owner_credential = ApprovalQueue(store, allow_credential_issuance=True)
+    credential = owner_credential.issue_approver_credential("owner", {"owner"})
     matcher = CardMatcher(command=("rm",))
     with pytest.raises(PermissionError, match="owner"):
-        queue.issue_card(
-            issuer=ApproverContext(actor="worker"), action_class="cleanup", tier="routine", matcher=matcher
-        )
+        queue.issue_card(credential="worker", action_class="cleanup", tier="routine", matcher=matcher)
     original = queue.issue_card(
-        issuer=OWNER, action_class="cleanup", tier="routine", matcher=matcher, transferable=True
+        credential=credential, action_class="cleanup", tier="routine", matcher=matcher, transferable=True
     )
-    queue.set_card_template("coder", (original.card_id,), issuer=OWNER)
+    queue.set_card_template("coder", (original.card_id,), credential=credential)
     parent = resolve("edit-and-run", grant(tmp_path, original))
     empty = resolve("edit-and-run", grant(tmp_path))
     assert parent.digest != empty.digest
@@ -338,27 +350,31 @@ def test_owner_templates_copy_held_cards_and_child_without_grant_inherits_no_car
 
 
 def test_sibling_copies_share_upstream_use_ceiling_under_concurrency(tmp_path: Path) -> None:
-    queue = ApprovalQueue(Store())
+    store = Store()
+    queue = ApprovalQueue(store)
+    owner_credential = ApprovalQueue(store, allow_credential_issuance=True)
+    credential = owner_credential.issue_approver_credential("owner", {"owner"})
     original = queue.issue_card(
-        issuer=OWNER,
+        credential=credential,
         action_class="cleanup",
         tier="routine",
         matcher=CardMatcher(command=("rm",)),
         max_uses=2,
         transferable=True,
     )
-    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+    owner_policy = resolve("edit-and-run", grant(tmp_path, original))
+    with policy_scope(owner_policy, approval_actor="owner") as owner:
         assert owner
-        children = []
-        for actor in ("a", "b"):
-            copy = queue.copy_card(original.card_id, holder=owner)
-            with policy_scope(grant(tmp_path, copy), approval_actor=actor) as child:
-                assert child
-                children.append(child)
+        copies = [queue.copy_card(original.card_id, holder=owner) for _ in range(2)]
 
     def submit(i: int) -> CardApproval | ApprovalTicket:
-        child = children[i % len(children)]
-        return queue.submit_typed_request(request(child, cleanup(), attempt=i + 1), requester=child)
+        sibling = i % len(copies)
+        with (
+            policy_scope(owner_policy, approval_actor="owner"),
+            policy_scope(grant(tmp_path, copies[sibling]), approval_actor=f"sibling-{sibling}") as child,
+        ):
+            assert child
+            return queue.submit_typed_request(request(child, cleanup(), attempt=i + 1), requester=child)
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(submit, range(10)))

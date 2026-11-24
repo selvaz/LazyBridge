@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import AsyncGenerator, Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
@@ -280,6 +281,7 @@ class Agent:
 
         self._tools_raw = list(tools or [])
         self.policy = policy
+        self._policy_agent_id = uuid.uuid4().hex
         self.tree_budget = tree_budget
         self.reserve_review = reserve_review
         self.budget_role = budget_role
@@ -481,13 +483,13 @@ class Agent:
         raised inside must propagate past this level up to the originating
         top-level :meth:`run`.
         """
-        from lazybridge.policy.context import policy_scope, review_engine
+        from lazybridge.policy.context import _policy_scope, review_engine
         from lazybridge.signals import ConcludeSignal
 
         timeout = getattr(self, "timeout", None)
         guard = getattr(self, "guard", None)
         with (
-            policy_scope(
+            _policy_scope(
                 getattr(self, "policy", None),
                 tree_budget=getattr(self, "tree_budget", None),
                 child_id=self,
@@ -499,6 +501,9 @@ class Agent:
                 work_units=getattr(self, "work_units", 1),
                 fresh=self._fresh_review,
                 read_only_review=self._read_only_review,
+                approval_actor=self.name,
+                agent_id=self._policy_agent_id,
+                session=(_session_override.get() if self._session_inherited else None) or self.session,
             ),
             _guarded_output() if guard else nullcontext(),
         ):
@@ -843,9 +848,9 @@ class Agent:
         Multimodal: pass ``images=`` / ``audio=`` to attach blocks to
         the streamed turn — same coercion semantics as :meth:`run`.
         """
-        from lazybridge.policy.context import bind_policy_context, policy_scope, review_engine
+        from lazybridge.policy.context import _bind_policy_context, _policy_scope, review_engine
 
-        with policy_scope(
+        with _policy_scope(
             getattr(self, "policy", None),
             tree_budget=getattr(self, "tree_budget", None),
             child_id=self,
@@ -858,18 +863,21 @@ class Agent:
             fresh=self._fresh_review,
             read_only_review=self._read_only_review,
             bind=False,
+            approval_actor=self.name,
+            agent_id=self._policy_agent_id,
+            session=self.session,
         ) as invocation:
             gen = self._stream_scoped(task, images=images, audio=audio)
             try:
                 while True:
                     try:
-                        with bind_policy_context(invocation):
+                        with _bind_policy_context(invocation):
                             chunk = await gen.__anext__()
                     except StopAsyncIteration:
                         return
                     yield chunk
             finally:
-                with bind_policy_context(invocation):
+                with _bind_policy_context(invocation):
                     await gen.aclose()
 
     async def _stream_scoped(
@@ -1017,6 +1025,12 @@ class Agent:
     # Tool exposure
     # ------------------------------------------------------------------
 
+    async def _run_as_delegated_tool(self, task: str | Envelope, **kwargs: Any) -> Envelope:
+        from lazybridge.policy.context import _agent_tool_call
+
+        with _agent_tool_call(self):
+            return await self._run_as_tool(task, **kwargs)
+
     def as_tool(
         self,
         name: str | None = None,
@@ -1025,6 +1039,7 @@ class Agent:
         verify: Agent | Callable[[str], Any] | None = None,
         max_verify: int = 3,
         verify_context: bool = False,
+        policy_grant: str | None = None,
     ) -> Tool:
         """Wrap this agent as a :class:`Tool` (advanced / compatibility API).
 
@@ -1063,6 +1078,9 @@ class Agent:
         called with the output) or a plain callable taking the output text
         and returning a verdict string / bool. On rejection, the judge's
         feedback is injected into the next attempt's task.
+
+        Set ``policy_grant`` to the capability required to invoke the tool
+        from a caller with an effective policy.
         """
         if max_verify < 1:
             raise ValueError(f"max_verify must be >= 1, got {max_verify!r}")
@@ -1077,7 +1095,7 @@ class Agent:
                 # the sub-agent propagates up to the top-level caller instead of
                 # being absorbed here.  Duck-typed doubles without it fall back
                 # to ``run``.
-                runner = getattr(agent, "_run_as_tool", agent.run)
+                runner = getattr(agent, "_run_as_delegated_tool", getattr(agent, "_run_as_tool", agent.run))
                 caller_session = _calling_session.get()
                 token = None
                 if caller_session is not None and getattr(agent, "_session_inherited", False):
@@ -1121,7 +1139,7 @@ class Agent:
                         # ConcludeSignal propagation all live in
                         # ``_run_as_tool``. Sources were already snapshotted,
                         # so the private flag suppresses a second injection.
-                        runner = getattr(agent, "_run_as_tool", None)
+                        runner = getattr(agent, "_run_as_delegated_tool", None) or getattr(agent, "_run_as_tool", None)
                         if runner is not None:
                             return await runner(snapshot, _sources_injected=True)
                         # Preserve support for duck-typed Agent doubles and
@@ -1164,6 +1182,7 @@ class Agent:
             returns_envelope=True,
             agent_memory=getattr(self, "memory", None),
             agent_store=getattr(self, "store", None),
+            policy_grant=policy_grant,
         )
         # Plan uses this additive marker to preserve the complete Envelope
         # when a named step resolves back to an Agent tool.  Ordinary LLM
@@ -1216,6 +1235,7 @@ class Agent:
         )
         base_kwargs.update(overrides)
         derived = Agent(**base_kwargs)
+        derived._policy_agent_id = self._policy_agent_id
         derived._read_only_review = self._read_only_review
         # __init__ stamps engine._agent_name on every construction; since the engine
         # object is shared, restore the original so base-agent runs continue to

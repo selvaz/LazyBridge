@@ -64,6 +64,7 @@ from lazybridge.ext.approval.routing import (
     EscalationSummary,
     route_ticket,
 )
+from lazybridge.ext.approval.service import ServiceAgent
 from lazybridge.ext.approval.tiered import (
     AuditRecord,
     Channel,
@@ -103,6 +104,7 @@ __all__ = [
     "FeedbackRequest",
     "FeedbackResponder",
     "RequestExecutorContext",
+    "ServiceAgent",
     "StoreApprovalChannel",
     "TerminalChannel",
     "TicketKind",

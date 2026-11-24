@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+from contextvars import Context, copy_context
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
-from lazybridge import Store
+from lazybridge import Agent, AgentPool, Envelope, Session, Store, Tool
 from lazybridge.ext.approval import (
     ApprovalQueue,
     ApprovalTarget,
@@ -20,29 +21,43 @@ from lazybridge.ext.approval import (
     ApproverContext,
     EscalationSummary,
     ExecutorContext,
+    ServiceAgent,
     TypedApprovalRequest,
     route_ticket,
 )
 from lazybridge.policy import (
     ApprovalTier,
+    CardMatcher,
+    PolicyBudgetExceeded,
     PolicyContext,
+    PolicyError,
     PolicyWidening,
     TaskGrant,
     TreeBudget,
     child_within_parent,
     compile_claude,
     compile_codex,
+    current_approver_credential,
+    current_policy_context,
     policy_scope,
     resolve,
 )
+from lazybridge.policy.context import _policy_scope
+from lazybridge.testing import MockAgent
 
 AUTHORITY = frozenset({"run_tests", "package_install", "publish_pr"})
 OWNER = ApproverContext(actor="owner", role="owner")
 
 
-@pytest.fixture
-def authenticate() -> Mock:
-    return Mock(return_value=None)
+def provision(store: Store, principal: str = "owner", *roles: str) -> str:
+    issuer = ApprovalQueue(store, allow_credential_issuance=True)
+    return issuer.issue_approver_credential(principal, roles or ("owner",))
+
+
+def invocation_credential() -> str:
+    credential = current_approver_credential()
+    assert credential
+    return credential
 
 
 class Clock:
@@ -59,19 +74,26 @@ def grant(folder: Path, authority: frozenset[str] = frozenset()) -> TaskGrant:
 @contextmanager
 def tree(
     folder: Path, *, worker_authority: frozenset[str] = AUTHORITY, worker_profile: str = "edit-and-run"
-) -> Iterator[tuple[PolicyContext, PolicyContext, PolicyContext, PolicyContext]]:
+) -> Iterator[tuple[tuple[PolicyContext, ...], Callable[[PolicyContext], None]]]:
     owner_policy = resolve("edit-and-run", grant(folder, AUTHORITY))
-    with (
-        policy_scope(owner_policy, approval_actor="owner") as owner,
-        policy_scope(grant(folder, AUTHORITY), approval_actor="orchestrator") as orchestrator,
-        policy_scope(
-            child_within_parent(owner_policy, grant(folder, worker_authority), profile=worker_profile),
-            approval_actor="worker",
-        ) as worker,
-        policy_scope(grant(folder, worker_authority), approval_actor="sub-worker") as requester,
-    ):
-        assert owner and orchestrator and worker and requester
-        yield owner, orchestrator, worker, requester
+    with ExitStack() as cleanup:
+        scopes: list[tuple[PolicyContext, ExitStack]] = []
+        for name, policy in (
+            ("owner", owner_policy),
+            ("orchestrator", grant(folder, AUTHORITY)),
+            ("worker", child_within_parent(owner_policy, grant(folder, worker_authority), profile=worker_profile)),
+            ("sub-worker", grant(folder, worker_authority)),
+        ):
+            stack = cleanup.enter_context(ExitStack())
+            context = stack.enter_context(_policy_scope(policy, approval_actor=name, agent_id=name))
+            assert context
+            scopes.append((context, stack))
+
+        def unwind_to(context: PolicyContext) -> None:
+            while scopes[-1][0] is not context:
+                scopes.pop()[1].close()
+
+        yield tuple(context for context, _ in scopes), unwind_to
 
 
 def request(
@@ -95,33 +117,27 @@ def assignee(ticket: ApprovalTicket) -> str:
     return grant_used.actor
 
 
-def test_a1_nearest_authorized_parent_decides(tmp_path: Path, authenticate: Mock) -> None:
-    queue = ApprovalQueue(Store(), authenticate_approver=authenticate)
-    with tree(tmp_path) as chain:
+def test_a1_nearest_authorized_parent_decides(tmp_path: Path) -> None:
+    store = Store()
+    owner_credential = provision(store)
+    queue = ApprovalQueue(store)
+    with tree(tmp_path) as (chain, unwind_to):
         _, orchestrator, worker, requester = chain
         req = request(requester)
         ticket = queue.create_typed_ticket(req, requester=requester)
         assert (ticket.tier, ticket.action_class) == ("routine", "run_tests")
         assert ticket.requester_path == tuple(context.invocation_id for context in chain)
         assert assignee(ticket) == "worker"
-        approver = ApproverContext.from_invocation(worker)
-        assert queue.list_pending_tickets(assignee=approver) == [ticket]
+        assert queue.list_pending_tickets(assignee=ApproverContext.from_invocation(worker)) == [ticket]
         assert queue.list_pending_tickets(assignee=OWNER) == []
-        authenticate.return_value = OWNER
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
-        other_ancestor = ApproverContext.from_invocation(orchestrator)
-        authenticate.return_value = other_ancestor
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=other_ancestor, verdict="approved")
-        for change in ({"policy_digest": None}, {"policy_digest": "stale"}, {"invocation_id": "sibling"}):
-            stale_approver = approver.model_copy(update=change)
-            authenticate.return_value = stale_approver
-            assert not queue.decide_typed_ticket(ticket.approval_id, approver=stale_approver, verdict="approved")
-        authenticate.return_value = approver
-        assert queue.decide_typed_ticket(ticket.approval_id, approver=approver, verdict="approved")
+        assert not queue.decide_typed_ticket(ticket.approval_id, credential=owner_credential, verdict="approved")
+        unwind_to(worker)
+        assert queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
         decided = queue.get_ticket(ticket.approval_id)
         assert decided and decided.decision
         assert decided.decision.grant == route_ticket(ticket)
         assert decided.decision.decider == "worker"
+        unwind_to(orchestrator)
         executor = ExecutorContext(
             actor=requester.actor,
             task_id=req.task_id,
@@ -134,112 +150,141 @@ def test_a1_nearest_authorized_parent_decides(tmp_path: Path, authenticate: Mock
         assert not queue.consume_typed_ticket(ticket.approval_id, executor=executor)
 
 
-def test_a2_read_parent_without_authority_is_skipped(tmp_path: Path, authenticate: Mock) -> None:
-    queue = ApprovalQueue(Store(), authenticate_approver=authenticate)
-    with tree(tmp_path, worker_authority=frozenset(), worker_profile="read") as (_, orchestrator, worker, requester):
+def test_a2_read_parent_without_authority_is_skipped(tmp_path: Path) -> None:
+    queue = ApprovalQueue(Store())
+    with tree(tmp_path, worker_authority=frozenset(), worker_profile="read") as (chain, unwind_to):
+        _, orchestrator, worker, requester = chain
         ticket = queue.create_typed_ticket(request(requester), requester=requester)
         assert assignee(ticket) == "orchestrator"
         assert queue.list_pending_tickets(assignee=ApproverContext.from_invocation(worker)) == []
-        approver = ApproverContext.from_invocation(orchestrator)
-        authenticate.return_value = approver
-        assert queue.decide_typed_ticket(ticket.approval_id, approver=approver, verdict="approved")
+        unwind_to(orchestrator)
+        assert queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
 
 
-def test_a3_sensitive_actions_skip_direct_parent(tmp_path: Path, authenticate: Mock) -> None:
-    queue = ApprovalQueue(Store(), authenticate_approver=authenticate)
-    with tree(tmp_path) as (_, orchestrator, worker, requester):
+def test_a3_sensitive_actions_skip_direct_parent(tmp_path: Path) -> None:
+    queue = ApprovalQueue(Store())
+    with tree(tmp_path) as (chain, unwind_to):
+        _, orchestrator, worker, requester = chain
         ticket = queue.create_typed_ticket(request(requester, "package_install", "sensitive"), requester=requester)
         assert assignee(ticket) == "orchestrator"
-        parent = ApproverContext.from_invocation(worker)
-        authenticate.return_value = parent
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=parent, verdict="approved")
-        approver = ApproverContext.from_invocation(orchestrator)
-        authenticate.return_value = approver
-        assert queue.decide_typed_ticket(ticket.approval_id, approver=approver, verdict="approved")
+        unwind_to(worker)
+        assert not queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
+        unwind_to(orchestrator)
+        assert queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
 
 
-def test_a4_publication_requires_owner(tmp_path: Path, authenticate: Mock) -> None:
-    queue = ApprovalQueue(Store(), authenticate_approver=authenticate)
-    with tree(tmp_path) as (_, orchestrator, _, requester):
+def test_a4_publication_requires_owner(tmp_path: Path) -> None:
+    store = Store()
+    owner_credential = provision(store)
+    without_role = provision(store, "owner", "orchestrator")
+    queue = ApprovalQueue(store)
+    with tree(tmp_path) as (chain, unwind_to):
+        _, orchestrator, _, requester = chain
         req = request(requester, "publish_pr", "external")
         ticket = queue.create_typed_ticket(req, requester=requester)
         assert assignee(ticket) == "owner"
-        ancestor = ApproverContext.from_invocation(orchestrator)
-        authenticate.return_value = ancestor
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=ancestor, verdict="approved")
-        without_role = ApproverContext(actor="owner")
-        authenticate.return_value = without_role
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=without_role, verdict="approved")
-        authenticate.return_value = OWNER
-        assert queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
-        decided = queue.get_ticket(ticket.approval_id)
-        assert decided and decided.decision and decided.decision.grant
-        assert decided.decision.grant.source == "owner"
         with pytest.raises(ValueError, match="tier"):
             queue.create_typed_ticket(request(requester, "publish_pr", "routine"), requester=requester)
-        with pytest.raises(ValueError, match="trusted requester"):
-            queue.create_typed_ticket(req)
+        unwind_to(orchestrator)
+        assert not queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
+    assert not queue.decide_typed_ticket(ticket.approval_id, credential=without_role, verdict="approved")
+    assert queue.decide_typed_ticket(ticket.approval_id, credential=owner_credential, verdict="approved")
+    decided = queue.get_ticket(ticket.approval_id)
+    assert decided and decided.decision and decided.decision.grant
+    assert decided.decision.grant.source == "owner"
 
 
-def test_external_can_route_to_configured_independent_approver(tmp_path: Path, authenticate: Mock) -> None:
-    queue = ApprovalQueue(
-        Store(), authenticate_approver=authenticate, independent_approvers={"publish_pr": "release-reviewer"}
-    )
-    with tree(tmp_path) as (*_, requester):
-        ticket = queue.create_typed_ticket(request(requester, "publish_pr", "external"), requester=requester)
+@pytest.mark.asyncio
+async def test_a5_named_child_cannot_impersonate_independent_approver(tmp_path: Path) -> None:
+    store = Store()
+    owner_credential = provision(store)
+    independent = provision(store, "release-reviewer", "independent")
+    wrong_role = provision(store, "release-reviewer", "orchestrator")
+    queue = ApprovalQueue(store, independent_approvers={"publish_pr": "release-reviewer"})
+    policy = resolve("read", grant(tmp_path))
+    with policy_scope(policy, approval_actor="requester") as requester:
+        assert requester
+        req = request(requester, "publish_pr", "external")
+        ticket = queue.create_typed_ticket(req, requester=requester)
         assert assignee(ticket) == "release-reviewer"
-        authenticate.return_value = OWNER
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
-        approver = ApproverContext(actor="release-reviewer")
-        authenticate.return_value = ApproverContext.from_invocation(requester)
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=approver, verdict="approved")
-        authenticate.return_value = approver
-        assert queue.decide_typed_ticket(ticket.approval_id, approver=approver, verdict="approved")
+
+        def impersonate(_env: Envelope) -> str:
+            child = current_policy_context()
+            assert child and child.actor == assignee(ticket) and child.agent_id != requester.agent_id
+            assert not queue.decide_typed_ticket(
+                ticket.approval_id, credential=invocation_credential(), verdict="approved"
+            )
+            for run in (lambda fn: fn(), Context().run):
+                with pytest.raises(PermissionError):
+                    run(lambda: queue.issue_approver_credential("release-reviewer", {"independent"}))
+            return "denied"
+
+        child = MockAgent(impersonate, name="release-reviewer")
+        assert (await child.run("try approval")).text() == "denied"
+    assert not queue.decide_typed_ticket(ticket.approval_id, credential=owner_credential, verdict="approved")
+    assert not queue.decide_typed_ticket(ticket.approval_id, credential=wrong_role, verdict="approved")
+    assert queue.decide_typed_ticket(ticket.approval_id, credential=independent, verdict="approved")
+
+    pathless = queue.create_typed_ticket(req)
+    assert not pathless.requester_path and assignee(pathless) == "owner"
+    assert not queue.decide_typed_ticket(pathless.approval_id, credential=independent, verdict="approved")
+    assert queue.decide_typed_ticket(pathless.approval_id, credential=owner_credential, verdict="approved")
 
 
-def test_a5_requester_cannot_approve_even_with_the_grant(tmp_path: Path, authenticate: Mock) -> None:
-    queue = ApprovalQueue(Store(), authenticate_approver=authenticate)
-    with tree(tmp_path) as (*_, requester):
+def test_a5_requester_cannot_approve_even_with_the_grant(tmp_path: Path) -> None:
+    store = Store()
+    owner_credential = provision(store)
+    queue = ApprovalQueue(store)
+    with tree(tmp_path) as (chain, _):
+        requester = chain[-1]
         ticket = queue.create_typed_ticket(request(requester), requester=requester)
-        approver = ApproverContext.from_invocation(requester)
-        authenticate.return_value = approver
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=approver, verdict="approved")
+        assert not queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
+        forged = replace(requester, approval_actor="someone-else", agent_id="other-agent")
+        with pytest.raises(ValueError, match="active invocation"):
+            queue.create_typed_ticket(request(forged), requester=forged)
+        with policy_scope(None, approval_actor="alias") as alias:
+            assert alias and alias.agent_id == requester.agent_id
+            alias_ticket = queue.create_typed_ticket(request(alias), requester=alias)
+        assert not queue.decide_typed_ticket(
+            alias_ticket.approval_id, credential=invocation_credential(), verdict="approved"
+        )
     with policy_scope(resolve("read", grant(tmp_path)), approval_actor="owner") as owner:
         assert owner
         ticket = queue.create_typed_ticket(request(owner, "publish_pr", "external"), requester=owner)
-        assert route_ticket(ticket) is None
-        authenticate.return_value = OWNER
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
+    assert route_ticket(ticket) is None
+    assert not queue.decide_typed_ticket(ticket.approval_id, credential=owner_credential, verdict="approved")
 
 
-def test_a5_public_ticket_values_cannot_authenticate_an_approver(tmp_path: Path, authenticate: Mock) -> None:
-    store = Store()
-    queue = ApprovalQueue(store, authenticate_approver=authenticate)
-    unauthenticated_queue = ApprovalQueue(store)
-    with tree(tmp_path) as (_, _, worker, requester):
+def test_a5_public_ticket_values_cannot_authenticate_an_approver(tmp_path: Path) -> None:
+    queue = ApprovalQueue(Store())
+    with tree(tmp_path) as (chain, unwind_to):
+        _, _, worker, requester = chain
         ticket = queue.create_typed_ticket(request(requester), requester=requester)
         public = queue.get_ticket(ticket.approval_id)
         assert public and public.route and public.route.assignee
-        authenticate.return_value = ApproverContext.from_invocation(requester)
         for grant_used in (public.route.assignee, *public.route.remaining):
-            replay = ApproverContext(
-                actor=grant_used.actor,
-                invocation_id=grant_used.invocation_id,
-                policy_digest=grant_used.policy_digest,
-                role="owner" if grant_used.source == "owner" else None,
-            )
-            assert not unauthenticated_queue.decide_typed_ticket(public.approval_id, approver=replay, verdict="approved")
-            assert not queue.decide_typed_ticket(public.approval_id, approver=replay, verdict="approved")
+            for exposed in grant_used.model_dump().values():
+                if isinstance(exposed, str):
+                    assert not queue.decide_typed_ticket(public.approval_id, credential=exposed, verdict="approved")
         assert queue.get_ticket(public.approval_id) == public
 
-        # The assigned ancestor can still approve through a separately authenticated call.
-        approver = ApproverContext.from_invocation(worker)
-        authenticate.return_value = approver
-        assert queue.decide_typed_ticket(public.approval_id, approver=approver, verdict="approved")
+        unwind_to(worker)
+        credential = invocation_credential()
+        assert credential not in public.model_dump_json()
+        assert credential not in repr(worker)
+        assert Context().run(current_approver_credential) is None
+        assert not Context().run(
+            queue.decide_typed_ticket, public.approval_id, credential=credential, verdict="approved"
+        )
+        connection = copy_context()
+        assert queue.decide_typed_ticket(public.approval_id, credential=credential, verdict="approved")
+    assert connection.run(current_approver_credential) is None
 
 
-def test_a6_manual_forward_carries_summaries_to_the_owner(tmp_path: Path, authenticate: Mock) -> None:
-    queue = ApprovalQueue(Store(), authenticate_approver=authenticate)
+def test_a6_manual_forward_carries_summaries_to_the_owner(tmp_path: Path) -> None:
+    store = Store()
+    owner_credential = provision(store)
+    queue = ApprovalQueue(store)
     worker_summary = EscalationSummary(
         what="Run integration tests",
         why="Confirm a regression fix",
@@ -249,39 +294,37 @@ def test_a6_manual_forward_carries_summaries_to_the_owner(tmp_path: Path, authen
     orchestrator_summary = EscalationSummary(
         what="Run integration tests", why="Owner controls the fixture", risk="Fixture contention", alternatives=()
     )
-    with tree(tmp_path) as (_, orchestrator, worker, requester):
+    with tree(tmp_path) as (chain, unwind_to):
+        _, orchestrator, worker, requester = chain
         ticket = queue.create_typed_ticket(request(requester), requester=requester)
-        worker_context = ApproverContext.from_invocation(worker)
-        authenticate.return_value = OWNER
-        assert not queue.escalate(ticket.approval_id, worker_summary, approver=OWNER)
-        authenticate.return_value = ApproverContext.from_invocation(requester)
-        assert not queue.escalate(ticket.approval_id, worker_summary, approver=worker_context)
-        authenticate.return_value = worker_context
-        assert queue.escalate(ticket.approval_id, worker_summary, approver=worker_context)
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=worker_context, verdict="approved")
-        orchestrator_context = ApproverContext.from_invocation(orchestrator)
-        authenticate.return_value = orchestrator_context
-        assert queue.escalate(ticket.approval_id, orchestrator_summary, approver=orchestrator_context)
-        [at_owner] = queue.list_pending_tickets(assignee=OWNER)
-        assert at_owner.route is not None
-        assert [hop.to.actor for hop in at_owner.route.hops] == ["worker", "orchestrator", "owner"]
-        assert [hop.summary for hop in at_owner.route.hops] == [None, worker_summary, orchestrator_summary]
+        assert not queue.escalate(ticket.approval_id, worker_summary, credential=owner_credential)
+        assert not queue.escalate(ticket.approval_id, worker_summary, credential=invocation_credential())
+        unwind_to(worker)
+        worker_credential = invocation_credential()
+        assert queue.escalate(ticket.approval_id, worker_summary, credential=worker_credential)
+        assert not queue.decide_typed_ticket(ticket.approval_id, credential=worker_credential, verdict="approved")
+        unwind_to(orchestrator)
+        assert queue.escalate(ticket.approval_id, orchestrator_summary, credential=invocation_credential())
+    [at_owner] = queue.list_pending_tickets(assignee=OWNER)
+    assert at_owner.route is not None
+    assert [hop.to.actor for hop in at_owner.route.hops] == ["worker", "orchestrator", "owner"]
+    assert [hop.summary for hop in at_owner.route.hops] == [None, worker_summary, orchestrator_summary]
 
 
-def test_a7_timeout_advances_one_eligible_hop_and_preserves_ttl(tmp_path: Path, authenticate: Mock) -> None:
+def test_a7_timeout_advances_one_eligible_hop_and_preserves_ttl(tmp_path: Path) -> None:
     clock = Clock()
     timeout = timedelta(seconds=5)
     store = Store(db=str(tmp_path / "approvals.db"))
-    queue = ApprovalQueue(store, clock=clock, escalation_timeout=timeout, authenticate_approver=authenticate)
-    with tree(tmp_path) as (_, _, worker, requester):
+    queue = ApprovalQueue(store, clock=clock, escalation_timeout=timeout)
+    with tree(tmp_path) as (chain, unwind_to):
+        _, _, worker, requester = chain
         ticket = queue.create_typed_ticket(request(requester), requester=requester)
         clock.now += 3 * timeout
         with ThreadPoolExecutor(max_workers=4) as pool:
             observations = list(pool.map(queue.get_ticket, [ticket.approval_id] * 8))
         assert all(observed and assignee(observed) == "orchestrator" for observed in observations)
-        approver = ApproverContext.from_invocation(worker)
-        authenticate.return_value = approver
-        assert not queue.decide_typed_ticket(ticket.approval_id, approver=approver, verdict="approved")
+        unwind_to(worker)
+        assert not queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
         reread = ApprovalQueue(store, clock=clock, escalation_timeout=timeout)
         first = reread.get_ticket(ticket.approval_id)
         assert first and first.route
@@ -336,7 +379,8 @@ def test_historical_typed_ticket_keeps_its_original_request_digest() -> None:
     }
     old_digest = hashlib.sha256(json.dumps(old_body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     store = Store()
-    queue = ApprovalQueue(store, authenticate_approver=lambda: OWNER)
+    queue = ApprovalQueue(store)
+    credential = provision(store)
     request = TypedApprovalRequest.model_validate({**old_body, "digest": old_digest})
     assert request.canonical_digest() == old_digest
     ticket = queue.create_typed_ticket(request)
@@ -346,6 +390,7 @@ def test_historical_typed_ticket_keeps_its_original_request_digest() -> None:
             "tier",
             "action_class",
             "requester_path",
+            "requester_agent_id",
             "route",
             "card_proposal",
             "proposal_fingerprint",
@@ -355,7 +400,7 @@ def test_historical_typed_ticket_keeps_its_original_request_digest() -> None:
     )
     old_raw["request"] = {**old_body, "digest": old_digest}
     store.write(f"approval:{ticket.approval_id}", old_raw)
-    assert queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
+    assert queue.decide_typed_ticket(ticket.approval_id, credential=credential, verdict="approved")
     assert queue.consume_typed_ticket(
         ticket.approval_id,
         executor=ExecutorContext(
@@ -366,4 +411,169 @@ def test_historical_typed_ticket_keeps_its_original_request_digest() -> None:
             policy_revision=request.policy_revision,
             target=request.target,
         ),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bound", ["max_depth", "max_total_children", "max_work_units"])
+async def test_a13_pool_cycle_never_recovers_grants_or_routes_to_same_agent(tmp_path: Path, bound: str) -> None:
+    store = Store()
+    credential = provision(store)
+    queue = ApprovalQueue(store)
+    original = queue.issue_card(
+        credential=credential,
+        action_class="run_tests",
+        tier="routine",
+        matcher=CardMatcher(command=("pytest",)),
+        transferable=True,
+    )
+    root_grant = TaskGrant(
+        tmp_path,
+        {"tool_classes": ["read", "edit", "shell"]},
+        "on",
+        "local",
+        approval_authority=AUTHORITY,
+        approval_cards=(original,),
+    )
+    root_policy = resolve("edit-and-run", root_grant)
+    pool = AgentPool()
+    outer = None
+    asked = []
+
+    async def agent_a(env: Envelope) -> str:
+        nonlocal outer
+        ctx = current_policy_context()
+        assert ctx and ctx.effective_policy
+        if env.task == "outer":
+            outer = ctx
+            return await pool.route("B", "narrow")
+        assert outer and outer.agent_id == ctx.agent_id and outer.invocation_id != ctx.invocation_id
+        assert ctx.effective_policy.tool_classes == {"read"}
+        assert ctx.effective_policy.network == "off"
+        assert ctx.effective_policy.approval_authority == {"package_install"}
+        assert ctx.effective_policy.approval_cards == ()
+        ticket = queue.create_typed_ticket(request(ctx), requester=ctx)
+        assert ticket.requester_path[-3:] == (outer.invocation_id, ctx.parent_invocation_id, ctx.invocation_id)
+        assert assignee(ticket) == "orchestrator"
+        assert not queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
+        with pytest.raises(PolicyBudgetExceeded, match=bound):
+            await pool.route("B", "one more hop")
+        asked.append(ticket)
+        return "routed"
+
+    async def agent_b(_env: Envelope) -> str:
+        ctx = current_policy_context()
+        assert ctx and ctx.effective_policy and ctx.effective_policy.approval_cards == (b_card,)
+        return await pool.route("A", "return")
+
+    with policy_scope(root_policy, tree_budget=TreeBudget(**{bound: 3}), approval_actor="orchestrator") as root:
+        assert root
+        a_card = queue.copy_card(original.card_id, holder=root, transferable=True)
+        a_grant = replace(root_grant, approval_cards=(a_card,))
+        with policy_scope(a_grant, approval_actor="setup") as setup:
+            assert setup
+            b_card = queue.copy_card(a_card.card_id, holder=setup)
+        b_grant = replace(grant(tmp_path, frozenset({"package_install"})), approval_cards=(b_card,))
+        a = MockAgent(agent_a, name="A", policy=resolve("edit-and-run", a_grant))
+        b = MockAgent(agent_b, name="B", policy=resolve("read", b_grant))
+        pool.register(a, b)
+        assert (await a.run("outer")).text() == "routed"
+        [ticket] = asked
+        assert queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
+
+
+@pytest.mark.asyncio
+async def test_a13_pool_review_requires_a_distinct_agent_and_session(tmp_path: Path) -> None:
+    session = Session()
+    pool = AgentPool()
+    reviewer = MockAgent("approved", name="reviewer", budget_role="reviewer", budget_engine="claude")
+    reviewer.session = session
+    pool.register(reviewer)
+
+    async def review(_env: Envelope) -> str:
+        with pytest.raises(PolicyError, match="different agent and session"):
+            await pool.route("reviewer", "review")
+        reviewer.session = Session()
+        return await pool.route("reviewer", "review independently")
+
+    writer = MockAgent(review, name="writer", reserve_review=True, budget_engine="codex")
+    writer.session = session
+    with policy_scope(resolve("read", grant(tmp_path)), tree_budget=TreeBudget(max_active_children=2)):
+        assert (await writer.run("write")).text() == "approved"
+    reviewer.assert_call_count(1)
+
+
+@pytest.mark.asyncio
+async def test_a14_wider_tools_are_attenuated_and_services_run_only_after_approval(tmp_path: Path) -> None:
+    queue = ApprovalQueue(Store())
+    observations = []
+    wide = resolve("edit-and-run", TaskGrant(tmp_path, {"tool_classes": ["read", "edit", "shell"]}, "on", "local"))
+    narrow = resolve("read", grant(tmp_path))
+
+    class CaptureEngine:
+        async def run(self, env, *, tools, **kwargs):
+            ctx = current_policy_context()
+            assert ctx and ctx.effective_policy
+            observations.append((env.task, ctx, {tool.name for tool in tools}))
+            return Envelope(payload="done")
+
+    b = Agent(
+        engine=CaptureEngine(),
+        name="B",
+        policy=wide,
+        tools=[Tool(lambda: "edit", name="edit", policy_grant="edit")],
+    )
+    tool = b.as_tool(policy_grant="read")
+    service = ServiceAgent(queue, b, action_class="run_tests", tier="routine")
+    requests = []
+
+    async def caller(_env: Envelope) -> str:
+        ctx = current_policy_context()
+        assert ctx
+        assert (await tool.run(task="ordinary call")).ok
+        ticket = service.request("approved call", task_id="test-service")
+        requests.append(ticket)
+        assert ticket.request and ticket.request.service_call
+        assert ticket.requester_path[-1] == ctx.invocation_id
+        assert assignee(ticket) == "orchestrator"
+        assert not queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
+        with pytest.raises(ValueError, match="configured service agent"):
+            queue.create_typed_ticket(ticket.request, requester=ctx)
+        with pytest.raises(PermissionError):
+            await service.execute(ticket.approval_id)
+        return "requested"
+
+    a = MockAgent(caller, name="A", policy=narrow)
+    caller_policy = resolve("read", grant(tmp_path, frozenset({"run_tests"})))
+    with policy_scope(caller_policy, approval_actor="orchestrator"):
+        assert (await a.run("work")).ok
+        [ticket] = requests
+    assert await service.execute(ticket.approval_id) is None
+    [(task, ctx, tools)] = observations
+    assert task == "ordinary call" and ctx.parent.actor == "A"
+    assert ctx.effective_policy.tool_classes == {"read"} and ctx.effective_policy.network == "off"
+    assert tools == set()
+
+    # The original invocation can decide only while it is active.
+    with policy_scope(caller_policy, approval_actor="orchestrator"):
+        assert not queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
+        requests.clear()
+        assert (await a.run("work")).ok
+        [ticket] = requests
+        assert queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
+    b.policy = narrow
+    assert await service.execute(ticket.approval_id) is None
+    b.policy = wide
+    results = await asyncio.gather(service.execute(ticket.approval_id), service.execute(ticket.approval_id))
+    assert sum(result is not None and result.ok for result in results) == 1
+    assert len(observations) == 3
+    task, ctx, tools = observations[-1]
+    assert task == "approved call" and ctx.parent is None
+    assert ctx.effective_policy == wide and tools == {"edit"}
+    receipt = queue.get_ticket(ticket.approval_id)
+    assert receipt and receipt.request and receipt.decision and receipt.effect_outcome
+    assert (receipt.request.requested_by, receipt.decision.decider, receipt.effect_outcome.executor) == (
+        "A",
+        "orchestrator",
+        "B",
     )
