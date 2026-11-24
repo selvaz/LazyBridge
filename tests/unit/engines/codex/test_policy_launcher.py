@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import sys
 import tomllib
 from dataclasses import replace
@@ -13,12 +14,12 @@ from lazybridge import Agent, CodexEngine, Tool
 from lazybridge.engines.codex import app_server
 from lazybridge.engines.codex.app_server import CodexAppServerClient
 from lazybridge.engines.codex.policy_launch import runtime_revision
-from lazybridge.policy import TaskGrant, compile_codex, load_profiles, resolve
+from lazybridge.policy import TaskGrant, compile_codex, load_profiles, release_check, resolve
 from lazybridge.policy.codex_admission import LAUNCH_PATH, REQUIRED_PROBES
 
 THREAD = "01020304-0102-0304-0102-010203040506"
 SERVER = """
-import json, sys
+import json, pathlib, sys, tomllib
 def read(method):
     request = json.loads(sys.stdin.readline())
     assert request["method"] == method, request
@@ -29,10 +30,28 @@ def reply(request, result):
     send(id=request["id"], result=result)
 reply(read("initialize"), {})
 read("initialized")
+config = pathlib.Path("config.toml").resolve()
+effective = tomllib.loads(config.read_text())
+if sys.argv[3] == "drift":
+    effective["mcp_servers"]["unknown"] = {"enabled": True}
+reply(read("config/read"), {
+    "config": effective,
+    "layers": [{"name": {"type": "user", "file": str(config)}}],
+})
 request = json.loads(sys.stdin.readline())
 with open(sys.argv[2], "w") as stream:
     json.dump(request, stream)
-reply(request, {"thread": {"id": sys.argv[1]}})
+params = request["params"]
+reply(request, {
+    "approvalPolicy": params["approvalPolicy"],
+    "cwd": params["cwd"],
+    "sandbox": {
+        "type": "workspaceWrite",
+        "networkAccess": False,
+        "writableRoots": params["config"]["sandbox_workspace_write"]["writable_roots"],
+    },
+    "thread": {"id": sys.argv[1]},
+})
 turn = read("turn/start")
 reply(turn, {"turn": {"id": "new"}})
 for name in ("allowed", "hidden"):
@@ -57,6 +76,7 @@ def report_for(policy, runtime):
             {
                 "profile": policy.profile,
                 "network": policy.network,
+                "tool_classes": sorted(policy.tool_classes),
                 "status": "green",
                 "probes": {probe: {"passed": True} for probe in REQUIRED_PROBES},
             }
@@ -105,6 +125,7 @@ async def test_governed_config_rpc_tool_filter_and_resume(tmp_path, monkeypatch)
     client = CodexAppServerClient(policy_release_report=report, policy_state_dir=tmp_path / "state")
     create_subprocess = asyncio.create_subprocess_exec
     launches = []
+    drift = False
 
     async def spawn(*args, **kwargs):
         assert args == (str(executable), "app-server", "--strict-config")
@@ -116,7 +137,9 @@ async def test_governed_config_rpc_tool_filter_and_resume(tmp_path, monkeypatch)
         assert tomllib.loads((home / "config.toml").read_text()) == compile_codex(policy)["config_overrides"]
         capture = tmp_path / f"rpc-{len(launches)}.json"
         launches.append(capture)
-        return await create_subprocess(sys.executable, str(fixture), THREAD, str(capture), **kwargs)
+        return await create_subprocess(
+            sys.executable, str(fixture), THREAD, str(capture), "drift" if drift else "", **kwargs
+        )
 
     monkeypatch.setattr(app_server.asyncio, "create_subprocess_exec", spawn)
     invoked = []
@@ -156,3 +179,30 @@ async def test_governed_config_rpc_tool_filter_and_resume(tmp_path, monkeypatch)
     assert not result.ok
     assert "does not match the current admission" in result.error.message
     assert len(launches) == 2
+
+    drift = True
+    report.write_text(json.dumps(report_for(policy, revision)))
+    result = await resumed.run("check with drift")
+    assert not result.ok
+    assert "Effective Codex configuration differs: MCP inventory" in result.error.message
+    assert len(launches) == 3
+    assert not launches[-1].exists()
+
+
+@pytest.mark.asyncio
+async def test_unreachable_release_canary_is_red_for_every_row(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    @contextmanager
+    def unavailable():
+        raise OSError("injected endpoint failure")
+        yield
+
+    monkeypatch.setattr(release_check, "codex_executable", lambda: sys.executable)
+    monkeypatch.setattr(release_check, "runtime_revision", lambda _: "runtime")
+    monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: "codex-cli fixture")
+    monkeypatch.setattr(release_check, "_endpoint", unavailable)
+    report = await release_check.run_check(load_profiles(), tmp_path)
+    assert len(report["matrix"]) == 6
+    assert all(row["status"] == "red" for row in report["matrix"])
+    assert all("injected endpoint failure" in row["probes"]["shell_egress"]["detail"] for row in report["matrix"])

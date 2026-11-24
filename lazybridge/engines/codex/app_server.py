@@ -1194,6 +1194,11 @@ class CodexAppServerClient:
             )
             state.phase = "initialized"
             await send({"method": "initialized", "params": {}})
+            if policy_launch is not None and probe is None:
+                config = await request("config/read", {"cwd": cwd, "includeLayers": True})
+                mismatches = policy_launch.config_mismatches(config)
+                if mismatches:
+                    raise PolicyDenied("codex", f"Effective Codex configuration differs: {', '.join(mismatches)}.")
             # ``sandbox`` is the CLI's kebab-case ``SandboxMode`` enum
             # (read-only / workspace-write / danger-full-access); "readOnly"
             # is rejected outright with "unknown variant".
@@ -1239,6 +1244,8 @@ class CodexAppServerClient:
                 thread = await request("thread/start", thread_params)
             active_thread = thread["thread"]["id"]
             if policy_launch is not None:
+                if probe is None and (mismatches := policy_launch.thread_mismatches(thread)):
+                    raise PolicyDenied("codex", f"Effective Codex thread differs: {', '.join(mismatches)}.")
                 if thread_id is not None and active_thread != thread_id:
                     raise PolicyDenied("codex", "Codex resumed a different thread.")
                 policy_launch.bind_thread(active_thread)
@@ -1287,11 +1294,15 @@ class CodexAppServerClient:
                 # where a cancellation cannot lose it.
                 raise
             except Exception as exc:
-                if ephemeral:
+                if ephemeral and policy_launch is None:
                     raise  # nothing survives the subprocess: a retry is clean
+                recovery = (
+                    "Inspect the workspace before retrying."
+                    if ephemeral
+                    else f"Resume thread {active_thread} and inspect it before retrying."
+                )
                 raise CodexTurnUncertain(
-                    f"Turn was accepted but its outcome is unknown: {exc}. "
-                    f"Resume thread {active_thread} and inspect it before retrying.",
+                    f"Turn was accepted but its outcome is unknown: {exc}. {recovery}",
                     thread_id=active_thread,
                     turn_id=turn_id,
                 ) from exc
@@ -1352,6 +1363,12 @@ class CodexAppServerClient:
                 await _reap(process)
                 stderr_task.cancel()
                 await asyncio.gather(stderr_task, return_exceptions=True)
+                if policy_launch is not None:
+                    # A native MCP child can keep pipe handles open on Windows.
+                    # Close the asyncio transport before removing launch state.
+                    transport = getattr(process, "_transport", None)
+                    if transport is not None:
+                        transport.close()
 
             await _finish_despite_cancel(asyncio.ensure_future(collect_child()))
 

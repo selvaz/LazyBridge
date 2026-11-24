@@ -23,6 +23,7 @@ REQUIRED_PROBES = (
     "shell_egress",
     "tool_host_egress",
     "thread_reuse",
+    "resume_effective_policy",
     "changed_revision_denied",
 )
 
@@ -45,7 +46,7 @@ def admission_id(
         ):
             return None
         rows = [row for row in report["matrix"] if (row["profile"], row["network"]) == (policy.profile, policy.network)]
-        if len(rows) != 1 or rows[0]["status"] != "green":
+        if len(rows) != 1 or rows[0]["status"] != "green" or rows[0]["tool_classes"] != sorted(policy.tool_classes):
             return None
         probes = rows[0]["probes"]
         if not all(probes.get(name, {}).get("passed") is True for name in REQUIRED_PROBES):

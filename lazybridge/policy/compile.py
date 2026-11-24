@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .codex_admission import admission_id
-from .models import EffectivePolicy
+from .models import EffectivePolicy, PolicyError
 from .resolve import _thaw
 
 
@@ -118,4 +118,6 @@ def _toml_value(value: Any) -> str:
         return "{ " + ", ".join(f"{_toml_value(key)} = {_toml_value(item)}" for key, item in value.items()) + " }"
     if isinstance(value, list):
         return "[" + ", ".join(map(_toml_value, value)) + "]"
+    if not isinstance(value, str | bool | int | float):
+        raise PolicyError(f"Codex TOML cannot represent a {type(value).__name__} value.")
     return json.dumps(value, ensure_ascii=False, allow_nan=False).replace("\x7f", r"\u007f")

@@ -53,6 +53,14 @@ def _thread_record(state: Path, thread_id: str) -> Path:
     return state / f"{thread_id}.json"
 
 
+def _config_contains(actual: Any, expected: Any) -> bool:
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(
+            key in actual and _config_contains(actual[key], value) for key, value in expected.items()
+        )
+    return bool(actual == expected)
+
+
 class PolicyLaunch:
     """One compiled launch and the state it is authorized to access."""
 
@@ -64,12 +72,15 @@ class PolicyLaunch:
 
     @classmethod
     def admit(cls, policy: EffectivePolicy, executable: str, report: Path | None) -> PolicyLaunch:
+        binary = Path(executable).resolve(strict=True)
+        if binary.is_relative_to(policy.folder):
+            raise PolicyDenied("codex", "The Codex executable must be outside the assigned folder.")
         if report is not None and report.resolve().is_relative_to(policy.folder):
             raise PolicyDenied("codex", "The release report must be outside the assigned folder.")
-        compiled = compile_codex(policy, release_report=report, runtime_revision=runtime_revision(executable))
+        compiled = compile_codex(policy, release_report=report, runtime_revision=runtime_revision(str(binary)))
         if not compiled["eligible"]:
             raise PolicyDenied("codex", " ".join(compiled["ineligibility_reasons"]))
-        return cls(policy, compiled, executable)
+        return cls(policy, compiled, str(binary))
 
     @contextmanager
     def home(
@@ -116,11 +127,15 @@ class PolicyLaunch:
             elif path.is_symlink() or path.read_text(encoding="utf-8") != config:
                 raise PolicyDenied("codex", "The stored Codex config differs from the current admission.")
             env = {name: value for name, value in os.environ.items() if name.upper() in _ENVIRONMENT}
-            for name in ("CODEX_HOME", "TEMP", "TMP", "TMPDIR"):
-                env[name] = str(home)
+            env["CODEX_HOME"] = str(home)
             if api_key is not None:
                 env["OPENAI_API_KEY"] = api_key
-            yield home, env
+            # Codex creates helper shims and SQLite temporary files here.
+            # Its helper installer refuses a temp directory inside CODEX_HOME.
+            with tempfile.TemporaryDirectory(prefix="codex-tmp-", dir=home.parent) as temp:
+                for name in ("TEMP", "TMP", "TMPDIR"):
+                    env[name] = temp
+                yield home, env
         finally:
             if not self.bound:
                 rmtree(home)
@@ -133,3 +148,41 @@ class PolicyLaunch:
         with record.open("x", encoding="utf-8") as stream:
             stream.write(data)
         self.bound = True
+
+    def config_mismatches(self, snapshot: dict[str, Any]) -> list[str]:
+        expected = self.compiled["config_overrides"]
+        actual = snapshot.get("config") or {}
+        mismatches = [key for key, value in expected.items() if not _config_contains(actual, {key: value})]
+        if set(actual.get("mcp_servers", {})) != set(expected["mcp_servers"]):
+            mismatches.append("MCP inventory")
+        sources = []
+        for layer in snapshot.get("layers") or ():
+            source = layer["name"]
+            if layer.get("disabledReason"):
+                continue
+            if source["type"] == "user":
+                sources.append(Path(source["file"]).resolve())
+            elif source["type"] != "packagedDefaults" and (layer.get("config") or source["type"] == "project"):
+                mismatches.append(f"enabled {source['type']} config layer")
+        if sources != [self.home_path / "config.toml"]:
+            mismatches.append("isolated user config layer")
+        return mismatches
+
+    def thread_mismatches(self, thread: dict[str, Any]) -> list[str]:
+        expected = self.config
+        sandbox = thread.get("sandbox") or {}
+        writable = expected["sandbox_mode"] == "workspace-write"
+        mismatches = []
+        if thread.get("approvalPolicy") != "never":
+            mismatches.append("thread approval policy")
+        if not thread.get("cwd") or Path(thread["cwd"]).resolve() != self.policy.folder:
+            mismatches.append("thread cwd")
+        if sandbox.get("type") != ("workspaceWrite" if writable else "readOnly"):
+            mismatches.append("thread sandbox mode")
+        if writable:
+            if sandbox.get("networkAccess") is not expected["sandbox_workspace_write"]["network_access"]:
+                mismatches.append("thread network")
+            roots = {Path(path).resolve() for path in sandbox.get("writableRoots", ())}
+            if roots != {self.policy.folder, self.policy.scratch_folder}:
+                mismatches.append("thread writable roots")
+        return mismatches
