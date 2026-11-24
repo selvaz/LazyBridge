@@ -28,6 +28,7 @@ from lazybridge.engines.coding import (
 from lazybridge.engines.sessions import AliasBinding, SessionRegistry
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.model_tiers import translate_model
+from lazybridge.policy import PolicyDenied, current_policy_context
 from lazybridge.session import EventType
 
 from .mcp_adapter import to_mcp_tools
@@ -619,6 +620,8 @@ class ClaudeCodeEngine:
         """
         from lazybridge.engines.claude_code.usage import fetch_claude_usage
 
+        if current_policy_context() is not None:
+            raise PolicyDenied("claude-code", "The usage command has no governed launch path.")
         kwargs: dict[str, Any] = {"model": self.model, "cwd": self.cwd, "client": self._client}
         if timeout is not None:
             kwargs["timeout"] = timeout
@@ -635,6 +638,31 @@ class ClaudeCodeEngine:
         gate: ApprovalGate | None = None,
         tool_clock: ToolClock | None = None,
     ) -> ClaudeSdkOptions:
+        context = current_policy_context()
+        if context is not None:
+            policy = context.effective_policy
+            if policy.placement != "local":
+                raise PolicyDenied("claude-code", "The Claude SDK requires local placement.")
+            if self.cwd is not None and Path(self.cwd).resolve() != policy.folder:
+                raise PolicyDenied("claude-code", "Claude cwd differs from the assigned folder.")
+            return ClaudeSdkOptions(
+                cwd=str(policy.folder),
+                model=self.model,
+                fallback_model=self.fallback_model,
+                reasoning_effort=self.reasoning_effort,
+                thinking=self.thinking,
+                system_prompt=self.system,
+                max_turns=self.max_turns,
+                resume=resume,
+                file_roots=(str(policy.folder),),
+                include_partial_messages=partial,
+                stream_idle_timeout=self.stream_idle_timeout,
+                initialize_timeout=self.initialize_timeout,
+                tool_clock=tool_clock,
+                tool_observer=observe,
+                output_format=_output_format(output_type),
+                effective_policy=policy,
+            )
         builtin_tools = (("Read", "Glob", "Grep") if self.file_roots else ()) + (
             ("WebSearch", "WebFetch") if self.web else ()
         )

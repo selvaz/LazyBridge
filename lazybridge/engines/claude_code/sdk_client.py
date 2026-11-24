@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 from lazybridge._asyncbridge import abandoned_tasks
 from lazybridge.engines._tool_clock import ToolClock, wait_with_tool_clock
 from lazybridge.engines.coding import ApprovalRequest, ask_approval, closing_iter
+from lazybridge.policy import PolicyDenied, compile_claude, current_policy_context
 
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent, McpTool
 
@@ -573,11 +574,35 @@ class AgentSdkClient(ClaudeSdkClient):
 
             sdk_tools.append(_handler)
 
-        server = create_sdk_mcp_server(
-            name=options.mcp_server_name,
-            version="0.1.0",
-            tools=sdk_tools,
-        )
+        policy = options.effective_policy
+        compiled = compile_claude(policy) if policy is not None else None
+        if compiled is not None:
+            permissions = compiled["settings"]["permissions"]
+            native = tuple(name for name in permissions["allow"] if not name.startswith("mcp__"))
+            assert policy is not None
+            options = replace(
+                options,
+                cwd=str(policy.folder),
+                file_roots=(str(policy.folder),),
+                builtin_tools=native,
+                allowed_tools=tuple(permissions["allow"]),
+                disallowed_tools=tuple(permissions["deny"]),
+                setting_sources=(),
+                permission_mode="dontAsk",
+                preapprove_application_tools=False,
+                approval_gate=None,
+                mcp_tools=(),
+                auto_compact_window=None,
+            )
+            servers = compiled["mcp_config"]["mcpServers"]
+        else:
+            servers = {
+                options.mcp_server_name: create_sdk_mcp_server(
+                    name=options.mcp_server_name,
+                    version="0.1.0",
+                    tools=sdk_tools,
+                )
+            }
         allowed = list(options.allowed_tools)
         if options.permission_mode == "dontAsk":
             # ``dontAsk`` never consults ``can_use_tool``: anything not matched
@@ -686,6 +711,19 @@ class AgentSdkClient(ClaudeSdkClient):
         ) -> HookJSONOutput:
             return {"continue_": True}
 
+        async def enforce_policy_tool(
+            input_data: HookInput, tool_use_id: str | None, context: HookContext
+        ) -> HookJSONOutput:
+            if input_data.get("tool_name") in allowed:
+                return {}
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "Tool is outside the active policy grant.",
+                }
+            }
+
         native_tool_prefix = f"mcp__{options.mcp_server_name}__"
         observer_warning_types: set[type[BaseException]] = set()
 
@@ -754,17 +792,19 @@ class AgentSdkClient(ClaudeSdkClient):
                 )
             return {}
 
-        use_callback = (
+        use_callback = compiled is None and (
             bool(options.builtin_tools) or options.approval_gate is not None or not options.preapprove_application_tools
         )
         matchers: list[SdkHookMatcher] = []
+        if compiled is not None:
+            matchers.append(HookMatcher(hooks=[enforce_policy_tool]))
         if roots:
             # Scoped to the tools that touch files — including ones this
             # profile does not grant, so a future/settings-added Edit cannot
             # slip past the confinement it was never checked against.
             matchers.append(
                 HookMatcher(
-                    matcher="Read|Glob|Grep|Edit|Write|NotebookEdit",
+                    matcher="Read|Glob|Grep|Edit|MultiEdit|Write|NotebookEdit",
                     hooks=[confine_file_access],
                 )
             )
@@ -803,8 +843,9 @@ class AgentSdkClient(ClaudeSdkClient):
             tools=list(options.builtin_tools),
             allowed_tools=allowed,
             disallowed_tools=list(options.disallowed_tools),
-            mcp_servers={options.mcp_server_name: server},
+            mcp_servers=servers,
             strict_mcp_config=True,
+            settings=json.dumps(compiled["settings"]) if compiled is not None else None,
             permission_mode=options.permission_mode or ("default" if use_callback else "dontAsk"),
             can_use_tool=can_use_tool if use_callback else None,
             # Both hooks intentionally use the generic (dict, str | None, Any)
@@ -838,9 +879,19 @@ class AgentSdkClient(ClaudeSdkClient):
             output_format=options.output_format,
         )
 
+    def _authorize_policy(self, options: ClaudeSdkOptions) -> None:
+        context = current_policy_context()
+        if context is not None and options.effective_policy != context.effective_policy:
+            raise PolicyDenied("claude-code", "The active policy did not reach the Claude SDK boundary.")
+        if options.effective_policy is not None:
+            compiled = compile_claude(options.effective_policy)
+            if not compiled["eligible"]:
+                raise PolicyDenied("claude-code", " ".join(compiled["ineligibility_reasons"]))
+
     async def run(
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> ClaudeSdkResult:
+        self._authorize_policy(options)
         try:
             from claude_agent_sdk import ResultMessage
         except ImportError as exc:  # pragma: no cover
@@ -920,11 +971,17 @@ class AgentSdkClient(ClaudeSdkClient):
         drift apart again: whenever ``_sdk_options`` would register the
         observer hooks, this must say streaming input is needed too.
         """
-        return bool(options.builtin_tools) or bool(attachments) or options.tool_observer is not None
+        return (
+            options.effective_policy is not None
+            or bool(options.builtin_tools)
+            or bool(attachments)
+            or options.tool_observer is not None
+        )
 
     async def stream(
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> AsyncIterator[ClaudeSdkStreamEvent]:
+        self._authorize_policy(options)
         try:
             from claude_agent_sdk import ResultMessage, StreamEvent
         except ImportError as exc:  # pragma: no cover
