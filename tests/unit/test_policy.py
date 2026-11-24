@@ -12,6 +12,7 @@ from lazybridge.policy import (
     opposite_engine_reviewer,
     policy_scope,
     resolve,
+    select_reviewer,
 )
 
 
@@ -121,6 +122,36 @@ def test_reviewer_is_always_opposite_engine():
     assert opposite_engine_reviewer("codex") == "claude"
     with pytest.raises(PolicyError, match="unsupported writer engine"):
         opposite_engine_reviewer("same")
+
+
+def test_default_reviewer_selection_refuses_same_engine():
+    assert select_reviewer("claude", {"codex", "claude"}) == ("codex", "opposite-engine")
+    with pytest.raises(PolicyError, match="opposite reviewer engine 'codex' is unavailable"):
+        select_reviewer("claude", {"claude"})
+
+
+@pytest.mark.parametrize(
+    "writer,available,expected",
+    [
+        ("claude", ["claude", "codex"], ("codex", "opposite-engine")),
+        ("codex", ["codex", "Claude-Code"], ("claude", "opposite-engine")),
+        ("Claude-Code", ["claude", "claude-code"], ("claude", "same-provider-fresh")),
+        ("codex", ["codex"], ("codex", "same-provider-fresh")),
+    ],
+)
+def test_fallback_reviewer_selection(writer, available, expected):
+    assert select_reviewer(writer, iter(available), "opposite-or-fresh") == expected
+
+
+@pytest.mark.parametrize("available", [[], ["claude", "other"], ["other"]])
+def test_fallback_reviewer_requires_the_writer_engine_to_be_the_only_available_engine(available):
+    with pytest.raises(PolicyError, match="unavailable"):
+        select_reviewer("claude", available, "opposite-or-fresh")
+
+
+def test_reviewer_selection_refuses_unknown_mode():
+    with pytest.raises(PolicyError, match="unsupported review mode"):
+        select_reviewer("claude", ["codex"], "unknown")
 
 
 def test_digest_is_canonical_for_unordered_grants(tmp_path):
