@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 
 import pytest
 
@@ -10,6 +11,7 @@ from lazybridge.policy import (
     PolicyWidening,
     TaskGrant,
     TreeBudget,
+    child_within_parent,
     current_policy_context,
     policy_scope,
     resolve,
@@ -65,6 +67,27 @@ async def test_nested_mock_sibling_and_grandchild_cannot_widen(tmp_path):
             await MockAgent("no", name="sibling", policy=wider).run("x")
         with policy_scope(parent), pytest.raises(PolicyWidening):
             await MockAgent("no", name="grandchild", policy=wider).run("x")
+
+
+def test_grandchild_can_narrow_to_sub_subfolder(tmp_path):
+    parent = policy(tmp_path, classes=("read", "edit"))
+    child = child_within_parent(parent, TaskGrant(tmp_path / "sub", {"tool_classes": ["read"]}, "off", "local"))
+    request = TaskGrant(child.folder / "nested", {"tool_classes": ["read"]}, "off", "local")
+
+    with policy_scope(parent), policy_scope(child), policy_scope(request) as context:
+        grandchild = context.effective_policy
+        assert grandchild.folder == child.folder / "nested"
+        assert grandchild.scratch_folder == child.scratch_folder / "nested"
+        assert grandchild.tool_classes == {"read"}
+
+    escaped = replace(grandchild, scratch_folder=child.scratch_folder / ".." / "sibling")
+    with (
+        policy_scope(parent),
+        policy_scope(child),
+        pytest.raises(PolicyWidening, match="scratch"),
+        policy_scope(escaped),
+    ):
+        pass
 
 
 @pytest.mark.asyncio
@@ -174,8 +197,6 @@ async def test_wrapped_tool_preserves_policy_grant(tmp_path):
 
 
 def test_resolved_child_checks_scratch_and_mcp_configuration(tmp_path):
-    from dataclasses import replace
-
     parent = policy(tmp_path)
     with (
         policy_scope(parent),

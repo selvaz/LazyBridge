@@ -589,7 +589,7 @@ class AgentSdkClient(ClaudeSdkClient):
             options = replace(
                 options,
                 cwd=str(policy.folder),
-                file_roots=(str(policy.folder),),
+                file_roots=(str(policy.folder), str(policy.scratch_folder)),
                 builtin_tools=native,
                 allowed_tools=tuple(permissions["allow"]),
                 disallowed_tools=tuple(permissions["deny"]),

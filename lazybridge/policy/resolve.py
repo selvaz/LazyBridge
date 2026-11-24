@@ -111,8 +111,26 @@ def _digest(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def resolve(profile: str, grant: TaskGrant, document: ProfileDocument | None = None) -> EffectivePolicy:
-    """Intersect explicit task grants with the named profile ceiling."""
+def resolve(
+    profile: str, grant: TaskGrant, document: ProfileDocument | None = None, *, strict: bool = False
+) -> EffectivePolicy:
+    """Intersect task grants with the profile ceiling and keep scratch inside the assigned folder.
+
+    Tool classes above the ceiling appear in ``removed_grants``. With
+    ``strict=True``, they raise ``PolicyError`` instead. The digest covers
+    effective authority and excludes removal diagnostics to preserve existing digests.
+    """
+    return _resolve(profile, grant, document, strict=strict)
+
+
+def _resolve(
+    profile: str,
+    grant: TaskGrant,
+    document: ProfileDocument | None,
+    *,
+    parent: EffectivePolicy | None = None,
+    strict: bool = False,
+) -> EffectivePolicy:
     document = document or load_profiles()
     if profile not in document.profiles:
         raise PolicyError(f"unknown profile: {profile!r}")
@@ -124,17 +142,28 @@ def resolve(profile: str, grant: TaskGrant, document: ProfileDocument | None = N
         raise PolicyError("grants must be a mapping")
     _expect_keys(grant.grants, GRANT_KEYS, "grant")
     folder = Path(grant.folder).expanduser().resolve()
-    scratch = Path(grant.grants.get("scratch_folder", folder / ".scratch")).expanduser()
+    default_scratch = folder / ".scratch"
+    if parent is not None:
+        if not folder.is_relative_to(parent.folder):
+            raise PolicyWidening("folder outside parent folder")
+        if not default_scratch.is_relative_to(parent.scratch_folder):
+            default_scratch = parent.scratch_folder / folder.relative_to(parent.folder)
+    scratch = Path(grant.grants.get("scratch_folder", default_scratch)).expanduser()
     if not scratch.is_absolute():
         scratch = folder / scratch
     scratch = scratch.resolve()
-    if scratch != folder and folder not in scratch.parents:
+    if parent is None and not scratch.is_relative_to(folder):
         raise PolicyError("scratch_folder must be inside the assigned folder")
     requested_classes = frozenset(_strings(grant.grants.get("tool_classes", ()), "tool_classes"))
     unknown_classes = requested_classes - TOOL_CLASSES
     if unknown_classes:
         raise PolicyError(f"unknown granted tool class(es): {', '.join(sorted(unknown_classes))}")
     classes = requested_classes & document.profiles[profile].allowed_tool_classes
+    removed_classes = sorted(requested_classes - classes)
+    removal_reason = f"above the {profile!r} profile ceiling"
+    if strict and removed_classes:
+        raise PolicyError(f"tool class grant(s) {', '.join(removed_classes)}: {removal_reason}")
+    removed_grants = tuple((name, removal_reason) for name in removed_classes)
     tools = frozenset(_strings(grant.grants.get("tools", ()), "tools"))
     unknown_tools = tools - TOOL_GRANTS
     if unknown_tools:
@@ -189,6 +218,7 @@ def resolve(profile: str, grant: TaskGrant, document: ProfileDocument | None = N
         inventory,
         inventory_tools,
         _digest(canonical),
+        removed_grants=removed_grants,
     )
 
 
@@ -198,12 +228,20 @@ def child_within_parent(
     profile: str | None = None,
     document: ProfileDocument | None = None,
 ) -> EffectivePolicy:
-    """Resolve a child and reject every expansion of the immediate parent."""
+    """Resolve a child within the immediate parent's authority.
+
+    The working folder must stay within the parent's working folder. Scratch
+    stays within the parent's scratch tree, which may sit outside the child's
+    working folder. The default is ``<child>/.scratch`` if it already fits in
+    that tree, otherwise the child's path relative to the parent's working
+    folder is appended to the parent's scratch path. Relative scratch requests
+    are interpreted from the child's working folder.
+    """
     profile = profile or parent.profile
     document = document or load_profiles()
     if (document.version, document.revision) != (parent.version, parent.revision):
         raise PolicyWidening("profile document differs from parent")
-    child = resolve(profile, child_request, document)
+    child = _resolve(profile, child_request, document, parent=parent)
     requested_classes = set(_strings(child_request.grants.get("tool_classes", ()), "tool_classes"))
     if not requested_classes <= parent.tool_classes:
         raise PolicyWidening("tool class not granted to parent")
@@ -220,9 +258,11 @@ def validate_child_policy(parent: EffectivePolicy, child: EffectivePolicy) -> No
         raise PolicyWidening("profile document differs from parent")
     if not child.tool_classes <= parent.tool_classes or not child.tools <= parent.tools:
         raise PolicyWidening("child capability not granted to parent")
-    if child.folder != parent.folder and parent.folder not in child.folder.parents:
+    # A supplied EffectivePolicy can carry paths that did not go through _resolve.
+    folder, scratch = child.folder, child.scratch_folder
+    if not folder.is_relative_to(parent.folder) or not folder.resolve().is_relative_to(parent.folder):
         raise PolicyWidening("folder outside parent folder")
-    if child.scratch_folder != parent.scratch_folder and parent.scratch_folder not in child.scratch_folder.parents:
+    if not scratch.is_relative_to(parent.scratch_folder) or not scratch.resolve().is_relative_to(parent.scratch_folder):
         raise PolicyWidening("scratch folder outside parent scratch folder")
     if child.network == "on" and parent.network == "off":
         raise PolicyWidening("network on under parent off")

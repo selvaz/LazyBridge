@@ -14,8 +14,13 @@ from .resolve import _thaw
 WINDOWS_SHELL_ENV = ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP")
 
 
-def _metadata(policy: EffectivePolicy) -> dict[str, str | int]:
-    return {"policy_version": policy.version, "policy_revision": policy.revision, "policy_digest": policy.digest}
+def _metadata(policy: EffectivePolicy) -> dict[str, str | int | list[list[str]]]:
+    return {
+        "policy_version": policy.version,
+        "policy_revision": policy.revision,
+        "policy_digest": policy.digest,
+        "removed_grants": [[grant, reason] for grant, reason in policy.removed_grants],
+    }
 
 
 def compile_claude(

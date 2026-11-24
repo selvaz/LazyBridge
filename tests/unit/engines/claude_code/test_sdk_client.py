@@ -566,7 +566,7 @@ def test_core_policy_is_the_native_sdk_configuration(tmp_path, profile, network)
         with policy_scope(policy):
             options = engine._options([_Tool()], None, resume=resume)
         sdk = AgentSdkClient._sdk_options(options)
-        assert options.file_roots == (str(tmp_path.resolve()),)
+        assert options.file_roots == (str(policy.folder), str(policy.scratch_folder))
         assert sdk.cwd == str(tmp_path.resolve())
         assert sdk.permission_mode == "dontAsk"
         assert sdk.setting_sources == []
@@ -586,6 +586,31 @@ def test_core_policy_is_the_native_sdk_configuration(tmp_path, profile, network)
             assert command[command.index("--resume") + 1] == resume
         else:
             assert resume_flags == ([f"--resume={resume}"] if resume is not None else [])
+
+
+@pytest.mark.parametrize("tool_name", ["Read", "Write"])
+async def test_narrowed_child_confines_file_tools_to_its_folder_and_scratch(tmp_path, tool_name):
+    grants = {"tool_classes": ["read", "edit"]}
+    parent = resolve("edit", TaskGrant(tmp_path, grants, "off", "local"))
+    engine = ClaudeCodeEngine(file_roots=[parent.folder])
+    with policy_scope(parent), policy_scope(TaskGrant(parent.folder / "sub", grants, "off", "local")) as context:
+        child = context.effective_policy
+        options = engine._options([], None)
+
+    assert child.scratch_folder == parent.scratch_folder / "sub"
+    assert options.file_roots == (str(child.folder), str(child.scratch_folder))
+
+    # Verify that the SDK derives the same roots from the policy even if the caller provides wider options.
+    sdk = AgentSdkClient._sdk_options(dataclasses.replace(options, file_roots=(str(parent.folder),)))
+    assert tool_name in sdk.tools
+    assert tool_name in sdk.allowed_tools
+    hook = _pre_tool_use_hook(sdk, tool_name)
+    for path in (child.folder / "source.txt", child.scratch_folder / "notes.txt"):
+        assert await hook({"tool_name": tool_name, "tool_input": {"file_path": str(path)}}, None, object()) == {}
+
+    for path in (parent.scratch_folder / "sub-other" / "notes.txt", parent.folder / "sibling" / "source.txt"):
+        result = await hook({"tool_name": tool_name, "tool_input": {"file_path": str(path)}}, None, object())
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 async def test_unverified_policy_and_mismatched_resume_stop_before_transport(tmp_path):

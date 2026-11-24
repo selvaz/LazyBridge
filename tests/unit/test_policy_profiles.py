@@ -74,6 +74,32 @@ def test_edit_never_gets_shell(tmp_path: Path, network: str, placement: str) -> 
     assert tomllib.loads(compiled["codex_home_config_toml"])["features"] == {"shell_tool": False}
 
 
+def test_clamped_grants_are_reported_without_changing_digest(tmp_path: Path) -> None:
+    task = TaskGrant(tmp_path, {"tool_classes": ["shell", "read", "edit"]}, "off", "local")
+    allowed = replace(task, grants={"tool_classes": ["read", "edit"]})
+
+    clamped = resolve("edit", task)
+    exact = resolve("edit", allowed)
+    reason = "above the 'edit' profile ceiling"
+    assert clamped.removed_grants == (("shell", reason),)
+    assert exact.removed_grants == ()
+    assert clamped.digest == exact.digest
+    assert clamped == exact
+    for compile_policy in (compile_claude, compile_codex):
+        assert compile_policy(clamped)["removed_grants"] == [["shell", reason]]
+        assert compile_policy(exact)["removed_grants"] == []
+
+
+def test_strict_resolution_rejects_grants_above_the_ceiling(tmp_path: Path) -> None:
+    task = TaskGrant(tmp_path, {"tool_classes": ["shell", "read", "edit"]}, "off", "local")
+    with pytest.raises(PolicyError, match="edit, shell: above the 'read' profile ceiling"):
+        resolve("read", task, strict=True)
+
+    policy = resolve("edit-and-run", task, strict=True)
+    assert policy.tool_classes == {"read", "edit", "shell"}
+    assert policy.removed_grants == ()
+
+
 def test_shell_grant_does_not_force_enable_codex_shell(tmp_path: Path) -> None:
     compiled = compile_codex(resolve("edit-and-run", grant(tmp_path)))
     assert "features" not in compiled["config_overrides"]
