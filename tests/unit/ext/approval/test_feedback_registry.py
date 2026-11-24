@@ -68,7 +68,20 @@ def test_feedback_creation_persists_redacted_request_in_shared_registry() -> Non
     assert request.payload == {"nested": [{"api_key": "do-not-store", "region": "west"}]}
     assert "do-not-store" not in repr(store.read_all())
     assert set(store.keys()) == {f"approval:{approval.approval_id}", f"approval:{ticket.approval_id}"}
-    assert queue.list_pending_tickets() == [approval, ticket]
+
+
+def test_pending_approvals_exclude_feedback_before_applying_limit() -> None:
+    clock = Clock()
+    queue = ApprovalQueue(Store(), clock=clock)
+    feedback = queue.create_feedback_ticket(feedback_request())
+    clock.now += timedelta(seconds=1)
+    approval = queue.create_typed_ticket(approval_request(), kind="escalation")
+
+    assert queue.list_pending_tickets(limit=1) == [approval]
+
+    legacy = queue.create_ticket(task_id="old", prompt="Review this", kind="escalation")
+    assert queue.list_pending_tickets() == sorted([approval, legacy], key=lambda ticket: ticket.created_at)
+    assert queue.list_pending_feedback() == [feedback]
 
 
 def test_feedback_digest_covers_responder_role_and_rejects_tampering() -> None:

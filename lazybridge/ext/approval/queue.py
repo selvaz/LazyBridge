@@ -935,7 +935,9 @@ class ApprovalQueue:
         return [ticket for _, ticket in ranked[:limit]]
 
     def list_pending_tickets(self, *, limit: int = 100) -> list[ApprovalTicket]:
-        """Unexpired tickets still awaiting a decision, oldest first (FIFO queue).
+        """Unexpired approval tickets awaiting a decision, oldest first (FIFO queue).
+
+        See :meth:`list_pending_feedback` for structured feedback requests.
 
         Known accepted gap: this loads and deserializes EVERY record under
         ``prefix`` -- resolved and expired tickets included -- before
@@ -951,7 +953,7 @@ class ApprovalQueue:
         """
         if limit <= 0:
             raise ValueError(f"limit must be positive, got {limit}")
-        tickets = self._pending_tickets()
+        tickets = [ticket for ticket in self._pending_tickets() if ticket.feedback_request is None]
         tickets.sort(key=lambda t: t.created_at)
         return tickets[:limit]
 
