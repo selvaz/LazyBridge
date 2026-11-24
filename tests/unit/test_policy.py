@@ -79,6 +79,43 @@ def test_scratch_and_alias_containment(tmp_path):
     assert child_within_parent(parent, TaskGrant(tmp_path / ".", {}, "off", "local")).folder == parent.folder
 
 
+@pytest.mark.parametrize("scratch_name", [None, "custom"])
+def test_read_only_child_can_narrow_to_subfolder(tmp_path, scratch_name):
+    parent = resolve("edit", TaskGrant(tmp_path, {"tool_classes": ["read", "edit"]}, "off", "local"))
+    grants = {"tool_classes": ["read"]}
+    if scratch_name is not None:
+        grants["scratch_folder"] = str(parent.scratch_folder / scratch_name)
+    child = child_within_parent(parent, TaskGrant(tmp_path / "sub", grants, "off", "local"), profile="read")
+
+    assert child.folder == parent.folder / "sub"
+    assert child.scratch_folder == parent.scratch_folder / (scratch_name or "sub")
+    assert child.tool_classes == {"read"}
+
+
+def test_child_keeps_default_scratch_already_in_parent_scratch(tmp_path):
+    parent = resolve("read", TaskGrant(tmp_path, {"scratch_folder": "."}, "off", "local"))
+    child = child_within_parent(parent, TaskGrant(tmp_path / "sub", {}, "off", "local"))
+
+    assert child.scratch_folder == child.folder / ".scratch"
+
+
+def test_subfolder_child_cannot_widen_tool_classes(tmp_path):
+    parent = resolve("edit", TaskGrant(tmp_path, {"tool_classes": ["read", "edit"]}, "off", "local"))
+    request = TaskGrant(tmp_path / "sub", {"tool_classes": ["read", "shell"]}, "off", "local")
+
+    with pytest.raises(PolicyWidening, match="tool class not granted to parent"):
+        child_within_parent(parent, request)
+
+
+@pytest.mark.parametrize("scratch", [".scratch", "../.scratch/../escape"])
+def test_subfolder_child_cannot_escape_parent_scratch(tmp_path, scratch):
+    parent = resolve("read", TaskGrant(tmp_path, {}, "off", "local"))
+    request = TaskGrant(tmp_path / "sub", {"scratch_folder": scratch}, "off", "local")
+
+    with pytest.raises(PolicyWidening, match="scratch folder outside parent scratch folder"):
+        child_within_parent(parent, request)
+
+
 def test_reviewer_is_always_opposite_engine():
     assert opposite_engine_reviewer("claude") == "codex"
     assert opposite_engine_reviewer("codex") == "claude"
