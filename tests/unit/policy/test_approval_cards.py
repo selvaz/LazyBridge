@@ -145,25 +145,26 @@ def test_a9_standing_cleanup_matches_only_a_single_in_folder_command(tmp_path: P
 def test_a10_three_identical_misses_propose_one_card_to_the_parent(tmp_path: Path) -> None:
     store = Store(db=str(tmp_path / "approvals.db"))
     queue = ApprovalQueue(store)
-    with (
-        policy_scope(resolve("edit-and-run", grant(tmp_path)), approval_actor="owner") as owner,
-        policy_scope(grant(tmp_path), approval_actor="worker") as worker,
-    ):
-        assert owner and worker
-        parent = ApproverContext.from_invocation(owner)
-        for attempt in (1, 2):
-            assert isinstance(
-                queue.submit_typed_request(request(worker, cleanup(), attempt=attempt), requester=worker),
-                ApprovalTicket,
-            )
-        different = cleanup("rm", "scratch/different", paths=(Path("scratch/different"),))
-        queue.submit_typed_request(request(worker, different), requester=worker)
+    with policy_scope(resolve("edit-and-run", grant(tmp_path)), approval_actor="owner") as owner:
+        assert owner
+        parent = ApproverContext.from_invocation(owner).model_copy(update={"actor": "unrelated-label"})
+        with policy_scope(grant(tmp_path), approval_actor="worker") as worker:
+            assert worker
+            for attempt in (1, 2):
+                assert isinstance(
+                    queue.submit_typed_request(request(worker, cleanup(), attempt=attempt), requester=worker),
+                    ApprovalTicket,
+                )
+            different = cleanup("rm", "scratch/different", paths=(Path("scratch/different"),))
+            queue.submit_typed_request(request(worker, different), requester=worker)
         assert queue.list_card_proposals(parent=parent) == []
-        queue.submit_typed_request(request(worker, cleanup(), attempt=3), requester=worker)
+        with policy_scope(grant(tmp_path), approval_actor="owner") as renamed:
+            assert renamed and renamed.agent_id == worker.agent_id
+            queue.submit_typed_request(request(renamed, cleanup(), attempt=3), requester=renamed)
         reopened = ApprovalQueue(store)
         [proposal] = reopened.list_card_proposals(parent=parent)
         assert proposal.occurrences == 3
-        assert proposal.requester == "worker"
+        assert proposal.requester in {"worker", "owner"}
         assert proposal.task_id == "task"
         assert proposal.matcher.command == ("rm", "scratch/item")
         assert proposal.matcher.arguments == ()

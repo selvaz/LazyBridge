@@ -686,6 +686,7 @@ class ApprovalQueue:
         clock: Callable[[], datetime] | None = None,
         allow_credential_issuance: bool = False,
         owner_actor: str = "owner",
+        # Accepted for compatibility while independent approval is disabled.
         independent_approvers: Mapping[str, str] | None = None,
         action_tiers: Mapping[str, ApprovalTier] | None = None,
         escalation_timeout: timedelta = DEFAULT_RENOTIFY_INTERVAL,
@@ -700,7 +701,6 @@ class ApprovalQueue:
         if not owner_actor.strip() or escalation_timeout <= timedelta(0):
             raise ValueError("routing requires an owner and a positive escalation timeout")
         self._owner = owner_actor
-        self._independent = dict(independent_approvers or {})
         self._action_tiers = dict(DEFAULT_ACTION_TIERS)
         for action_class, tier in (action_tiers or {}).items():
             if not action_class.strip() or tier not in ("routine", "sensitive", "external"):
@@ -765,9 +765,7 @@ class ApprovalQueue:
             raise ValueError("request digest does not match canonical request")
         if ttl <= timedelta(0):
             raise ValueError(f"ttl must be positive, got {ttl}")
-        if requester is not None and (
-            requester is not current_policy_context() or request.requested_by != requester.actor
-        ):
+        if requester is not None and requester is not current_policy_context():
             raise ValueError("requester must be the active invocation")
         if (
             requester is not None
@@ -780,7 +778,7 @@ class ApprovalQueue:
             or request.action_class is None
             or not self._tier_at_least(request.tier, self._action_tiers.get(request.action_class, "external"))
         ):
-            raise ValueError("requester identity, action class and tier must agree with the routing policy")
+            raise ValueError("action class and tier must agree with the routing policy")
         if requester is None and request.card_action is not None:
             raise ValueError("card requests require an active invocation")
         return request
@@ -810,11 +808,9 @@ class ApprovalQueue:
         chain = invocation_chain(requester) if requester is not None else ()
         route = build_route(
             chain,
-            requested_by=request.requested_by,
             tier=request.tier or "external",
             action_class=request.action_class or "unclassified",
             owner=self._owner,
-            independent=self._independent.get(request.action_class) if request.action_class else None,
             operator_only=operator_only,
             now=now,
             timeout=self._escalation_timeout,
@@ -855,7 +851,7 @@ class ApprovalQueue:
             requester_agent_id=requester.agent_id if requester is not None else None,
             route=route,
             card_proposal=proposal,
-            proposal_fingerprint=_canonical_digest(request, exclude={"attempt"}) if proposal else None,
+            proposal_fingerprint=_canonical_digest(request, exclude={"attempt", "requested_by"}) if proposal else None,
             proposal_parent=chain[-2].actor if proposal else None,
             proposal_parent_invocation_id=chain[-2].invocation_id if proposal else None,
         )
@@ -942,18 +938,13 @@ class ApprovalQueue:
             raise PermissionError("operation requires an owner credential")
 
     def _can_act(self, approver: ApproverContext, grant: ApprovalGrantUse | None) -> bool:
-        if grant is None or grant.actor != approver.actor:
+        if grant is None:
             return False
         if grant.source == "owner":
-            return self._is_owner(approver)
-        if grant.source == "independent":
-            return (
-                approver.invocation_id is None
-                and self._independent.get(grant.action_class) == approver.actor
-                and (approver.role == "independent" or "independent" in approver.roles)
-            )
+            return grant.actor == self._owner and self._is_owner(approver)
         return (
-            grant.invocation_id is not None
+            grant.source == "policy"
+            and grant.invocation_id is not None
             and grant.policy_digest is not None
             and approver.invocation_id == grant.invocation_id
             and approver.policy_digest == grant.policy_digest
@@ -1056,20 +1047,17 @@ class ApprovalQueue:
             return []
         with self._anchored() as anchored:
             items = anchored.items(prefix=self._prefix)
-        repeats: dict[str, CardProposal] = {}
+        repeats: dict[tuple[str | None, str], CardProposal] = {}
         for _, raw in items:
-            if (
-                not isinstance(raw, dict)
-                or raw.get("proposal_parent") != parent.actor
-                or raw.get("proposal_parent_invocation_id") != parent.invocation_id
-            ):
+            if not isinstance(raw, dict) or raw.get("proposal_parent_invocation_id") != parent.invocation_id:
                 continue
             ticket = ApprovalTicket.model_validate(raw)
             proposal, fingerprint = ticket.card_proposal, ticket.proposal_fingerprint
             if proposal is None or fingerprint is None:
                 continue
-            prior = repeats.get(fingerprint)
-            repeats[fingerprint] = (
+            key = (ticket.requester_agent_id, fingerprint)
+            prior = repeats.get(key)
+            repeats[key] = (
                 proposal if prior is None else proposal.model_copy(update={"occurrences": prior.occurrences + 1})
             )
         return [proposal for proposal in repeats.values() if proposal.occurrences >= 3]
@@ -1183,10 +1171,7 @@ class ApprovalQueue:
         request = ticket.request
         if request is None:
             return False
-        if approver.invocation_id is None or ticket.requester_agent_id is None:
-            if request.requested_by == approver.actor:
-                return False
-        elif approver.agent_id == ticket.requester_agent_id:
+        if ticket.requester_agent_id is not None and approver.agent_id == ticket.requester_agent_id:
             return False
         if not ticket.requester_path:
             # Historical, unclassified requests have no explicit owner hop.
@@ -1204,10 +1189,8 @@ class ApprovalQueue:
             return False
         if grant.source == "owner":
             return True
-        if ticket.operator_only:
+        if ticket.operator_only or request.tier == "external":
             return False
-        if request.tier == "external":
-            return grant.source == "independent"
         eligible = ticket.requester_path[: -2 if request.tier == "sensitive" else -1]
         return grant.source == "policy" and grant.invocation_id in eligible
 
@@ -1229,12 +1212,13 @@ class ApprovalQueue:
                 ticket.status != "pending"
                 or ticket.expires_at <= now
                 or route is None
+                or route.assignee is None
                 or not route.remaining
                 or not self._has_ticket_authority(ticket, principal, route.assignee)
             ):
                 return False
             hop = ApprovalHop(
-                from_actor=principal.actor, to=route.remaining[0], at=now, reason="forwarded", summary=summary
+                from_actor=route.assignee.actor, to=route.remaining[0], at=now, reason="forwarded", summary=summary
             )
             updated = ticket.model_copy(update={"route": route.advance(self._escalation_timeout, now=now, hop=hop)})
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))

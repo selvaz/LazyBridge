@@ -184,7 +184,7 @@ class PolicyContext(_InvocationCredential):
 
     @property
     def actor(self) -> str:
-        """Display identity used for routing and audit."""
+        """Display identity for request metadata and audit records."""
         return self.approval_actor or self.invocation_id
 
 

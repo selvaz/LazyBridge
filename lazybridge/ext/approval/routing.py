@@ -71,7 +71,7 @@ class ApproverContext(BaseModel):
     def from_invocation(cls, context: PolicyContext) -> ApproverContext:
         policy = context.effective_policy
         return cls(
-            actor=context.actor,
+            actor=context.invocation_id,
             invocation_id=context.invocation_id,
             policy_digest=policy.digest if policy else None,
             agent_id=context.agent_id,
@@ -120,38 +120,27 @@ def invocation_chain(requester: PolicyContext) -> tuple[PolicyContext, ...]:
 def build_route(
     chain: tuple[PolicyContext, ...],
     *,
-    requested_by: str,
     tier: ApprovalTier,
     action_class: str,
     owner: str,
-    independent: str | None,
     operator_only: bool,
     now: datetime,
     timeout: timedelta,
 ) -> ApprovalRoute:
     requester = chain[-1] if chain else None
     candidates: list[ApprovalGrantUse] = []
-    if requester is None or tier == "external" or operator_only:
-        if (
-            requester is not None
-            and not operator_only
-            and independent
-            and independent not in {owner, *(context.actor for context in chain)}
-        ):
-            candidates.append(ApprovalGrantUse(actor=independent, action_class=action_class, source="independent"))
-    else:
+    if requester is not None and tier != "external" and not operator_only:
         ancestors = chain[:-2] if tier == "sensitive" else chain[:-1]
         for ancestor in reversed(ancestors):
             policy = ancestor.effective_policy
             if (
                 ancestor.agent_id != requester.agent_id
-                and ancestor.actor != owner
                 and policy is not None
                 and action_class in policy.approval_authority
             ):
                 candidates.append(
                     ApprovalGrantUse(
-                        actor=ancestor.actor,
+                        actor=ancestor.invocation_id,
                         action_class=action_class,
                         source="policy",
                         invocation_id=ancestor.invocation_id,
@@ -159,16 +148,14 @@ def build_route(
                         agent_id=ancestor.agent_id,
                     )
                 )
-    if requested_by != owner:
-        candidates.append(ApprovalGrantUse(actor=owner, action_class=action_class, source="owner"))
-    if not candidates:
-        return ApprovalRoute()
+    candidates.append(ApprovalGrantUse(actor=owner, action_class=action_class, source="owner"))
     first, *remaining = candidates
+    from_actor = requester.invocation_id if requester is not None else "unscoped"
     return ApprovalRoute(
         assignee=first,
         remaining=tuple(remaining),
         deadline=now + timeout if remaining else None,
-        hops=(ApprovalHop(from_actor=requested_by, to=first, at=now, reason="initial"),),
+        hops=(ApprovalHop(from_actor=from_actor, to=first, at=now, reason="initial"),),
     )
 
 

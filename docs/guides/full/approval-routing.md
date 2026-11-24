@@ -16,7 +16,7 @@ digest. Compiled engine settings still govern execution permissions.
 | --- | --- | --- |
 | Routine | Task-local commands and cleanup, tests, local commits, scratch environments | Nearest ancestor with the action class |
 | Sensitive | Network access, package installs, pushes to non-default branches | Nearest ancestor with the action class above the direct parent |
-| External | Pull requests, production, spending, deletion, messages | Configured independent approver or owner |
+| External | Pull requests, production, spending, deletion, messages | Owner |
 
 The built-in class names are `command`, `cleanup`, `run_tests`, `local_commit`,
 `scratch_env`, `network`, `package_install`, `push_branch`, `publish_pr`,
@@ -25,12 +25,13 @@ with `ApprovalQueue(action_tiers=...)`. Unclassified actions require the
 external tier. The registry rejects tiers below a configured class's minimum.
 
 Pass the current requester's `PolicyContext` to `create_typed_ticket` for a
-manual flow or `submit_typed_request` to try a card first. The request's
-`requested_by` must equal the active invocation's `actor`. Agent names and
-the optional `approval_actor` label on low-level scopes are used for display
-and audit. Nested low-level scopes retain the enclosing agent's identity.
-The ticket's requester path and route contain invocation IDs and policy
-digests. They carry no credentials.
+manual flow or `submit_typed_request` to try a card first. Agent names and the
+optional `approval_actor` label on low-level scopes are display hints. They
+can appear in request metadata and card receipts. Routing and decision checks
+use the core's invocation IDs, agent identities, and effective policy grants,
+plus the owner principal backed by a registry credential. Nested low-level
+scopes retain the enclosing agent's identity. The ticket records the
+requester path and the route's policy grants without storing credentials.
 
 An ancestor uses the credential of its active invocation. For example, after
 a test runner files a ticket, its coordinator resumes and decides it.
@@ -93,7 +94,7 @@ bindings immediately before carrying out an approved effect.
 
 ## Provision operator credentials
 
-Provision owner and independent approver credentials outside agent execution.
+Provision owner credentials outside agent execution.
 The operator CLI prints the secret once and stores its hash with the principal
 and roles in the registry. For example, for the default owner on the default
 queue prefix, run
@@ -106,18 +107,17 @@ Use `--prefix` for a custom queue prefix. From host Python, use
 `ApprovalQueue(store, allow_credential_issuance=True)` and call
 `issue_approver_credential(principal, roles)`. Keep that handle and write
 access to the backing registry under operator control. Give agents the
-default queue with issuance disabled. Keep owner and independent credentials
-out of agent contexts, tool arguments, and logs. The core prevents
-self-approval through the public API under this boundary. In-process code
-holding the owner's credential acts as the owner.
+default queue with issuance disabled. Keep owner credentials out of agent
+contexts, tool arguments, and logs. The core prevents an invocation from
+approving its own ticket under this boundary. In-process code holding the
+owner's credential acts as the owner.
 
-Set `owner_actor` to the owner principal. For an independent external
-approver, map the action class to the principal in `independent_approvers`
-and issue that principal a credential with the `independent` role. A route
-can use that principal when it is outside the requester chain. Tickets
-without a requester path go to the owner, including historical unclassified
-tickets. When the owner is the requester and nobody else is eligible, the
-ticket remains unassigned.
+Set `owner_actor` to the owner principal. Tickets without a requester path
+go to the owner, including historical unclassified tickets. NC-14 disables
+independent approval pending the task 1b authentication review. The
+`independent_approvers` option is accepted for compatibility and has no effect.
+Previously filed tickets retain their recorded hops. Refile any pending
+ticket whose stored route omitted the owner.
 
 ## Pool calls and service agents
 
@@ -186,7 +186,8 @@ request digest. The approval requires no ticket or token. Submit once immediatel
 before each execution. When the request needs a ticket, three identical,
 card-eligible requests within the same task make a proposal available to the
 direct parent through `list_card_proposals`. The comparison uses the
-requester's actor and the parent's invocation, and ignores attempt numbers.
+requester's agent identity and the parent's invocation. It ignores display
+labels and attempt numbers.
 The parent can use the proposal to decide whether to delegate a card for
 future work.
 
