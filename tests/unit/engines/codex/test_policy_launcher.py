@@ -143,6 +143,25 @@ def test_durable_threads_bind_an_executor_credential_id(tmp_path):
             pytest.fail("Resume accepted a different credential identity.")
 
 
+def test_governed_home_starts_without_ambient_login(tmp_path, monkeypatch):
+    ambient = tmp_path / "ambient"
+    ambient.mkdir()
+    cache = ambient / "auth.json"
+    cache.write_text("ambient-cache-marker", encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(ambient))
+    ambient_auth = ("CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_IDENTITY_TOKEN_FILE")
+    for name in ambient_auth:
+        monkeypatch.setenv(name, "ambient-env-marker")
+
+    policy = resolve("read", TaskGrant(tmp_path / "task", {"tool_classes": ["read"]}, "off", "local"))
+    launch = PolicyLaunch(policy, compile_codex(policy), sys.executable)
+    with launch.home(None, True, tmp_path / "state", None) as (home, env):
+        assert {path.name for path in home.iterdir()} == {"config.toml"}
+        assert env["CODEX_HOME"] == str(home)
+        assert not set(ambient_auth).intersection(env)
+    assert cache.read_text(encoding="utf-8") == "ambient-cache-marker"
+
+
 def report_for(policy, runtime):
     return {
         "schema": 1,

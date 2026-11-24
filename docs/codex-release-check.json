@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "checked_at": "2026-11-24T01:46:05.875370+00:00",
+  "checked_at": "2026-11-24T02:06:08.104200+00:00",
   "launch_path": "CodexAppServerClient/stdio",
   "policy_version": 1,
   "policy_revision": "2026-11-23.1",
   "runtime_version": "codex-cli 0.167.0-alpha.4.1",
-  "runtime_revision": "3f9cc14a30cf13d185b0e6b537ceb5aeeaeef31f8cc9596d1cd543affd00448a",
+  "runtime_revision": "f203b835d7cdab3a8edb7be41056f1b57304df3be502ed452128666b87cd8fa6",
   "platform": "Windows-10-10.0.26100-SP0",
   "matrix": [
     {
@@ -34,11 +34,11 @@
         },
         "shell_roots": {
           "passed": false,
-          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [True, True]. Control output: task-canary"
         },
         "shell_egress": {
-          "passed": true,
-          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+          "passed": false,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [True, True]. Command control: True. Endpoint output [declared, undeclared]: ['fixture-ok', 'fixture-ok']"
         },
         "native_reads": {
           "passed": false,
@@ -61,8 +61,8 @@
           "detail": "Native thread/resume returned the bound ID."
         },
         "resume_effective_policy": {
-          "passed": true,
-          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: none."
+          "passed": false,
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: shell_egress."
         }
       }
     },
@@ -92,11 +92,11 @@
         },
         "shell_roots": {
           "passed": false,
-          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [True, True]. Control output: task-canary"
         },
         "shell_egress": {
-          "passed": true,
-          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+          "passed": false,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [True, True]. Command control: True. Endpoint output [declared, undeclared]: ['fixture-ok', 'fixture-ok']"
         },
         "native_reads": {
           "passed": false,
@@ -119,8 +119,8 @@
           "detail": "Native thread/resume returned the bound ID."
         },
         "resume_effective_policy": {
-          "passed": true,
-          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: none."
+          "passed": false,
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: shell_egress."
         }
       }
     },
@@ -151,11 +151,11 @@
         },
         "shell_roots": {
           "passed": false,
-          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [True, True]. Control output: task-canary"
         },
         "shell_egress": {
-          "passed": true,
-          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+          "passed": false,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [True, True]. Command control: True. Endpoint output [declared, undeclared]: ['fixture-ok', 'fixture-ok']"
         },
         "native_reads": {
           "passed": false,
@@ -179,7 +179,7 @@
         },
         "resume_effective_policy": {
           "passed": false,
-          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: isolated_config."
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: isolated_config, shell_egress."
         }
       }
     },
@@ -210,11 +210,11 @@
         },
         "shell_roots": {
           "passed": false,
-          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [True, True]. Control output: task-canary"
         },
         "shell_egress": {
-          "passed": true,
-          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+          "passed": false,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [True, True]. Command control: True. Endpoint output [declared, undeclared]: ['fixture-ok', 'fixture-ok']"
         },
         "native_reads": {
           "passed": false,
@@ -238,7 +238,7 @@
         },
         "resume_effective_policy": {
           "passed": false,
-          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: isolated_config."
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: isolated_config, shell_egress."
         }
       }
     },
@@ -270,11 +270,11 @@
         },
         "shell_roots": {
           "passed": false,
-          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [True, True]. Control output: task-canary"
         },
         "shell_egress": {
-          "passed": true,
-          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+          "passed": false,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [True, True]. Command control: True. Endpoint output [declared, undeclared]: ['fixture-ok', 'fixture-ok']"
         },
         "native_reads": {
           "passed": false,
@@ -298,7 +298,7 @@
         },
         "resume_effective_policy": {
           "passed": false,
-          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: isolated_config."
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: isolated_config, shell_egress."
         }
       }
     },
@@ -330,11 +330,11 @@
         },
         "shell_roots": {
           "passed": false,
-          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [True, True]. Control output: task-canary"
         },
         "shell_egress": {
           "passed": false,
-          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+          "detail": "Shell endpoint reachability [declared, undeclared]: [True, True]. Command control: True. Endpoint output [declared, undeclared]: ['fixture-ok', 'fixture-ok']"
         },
         "native_reads": {
           "passed": false,
