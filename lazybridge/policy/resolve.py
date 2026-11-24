@@ -172,6 +172,7 @@ def resolve(profile: str, grant: TaskGrant, document: ProfileDocument | None = N
         "placement": grant.placement,
         "mcp_servers": _thaw(servers),
         "mcp_inventory": inventory,
+        "mcp_inventory_tools": _thaw(inventory_tools),
     }
     return EffectivePolicy(
         profile,

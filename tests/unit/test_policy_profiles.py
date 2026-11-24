@@ -133,6 +133,7 @@ def test_claude_permissions_and_mcp_are_scoped_and_immutable(tmp_path: Path) -> 
     permissions = result["settings"]["permissions"]
     assert {"Read", "Edit", "Write", "WebFetch", "WebSearch", "mcp__approved__lookup"} <= set(permissions["allow"])
     assert {"Bash", "mcp__approved__mutate"} <= set(permissions["deny"])
+    assert "mcp__approved__lookup" not in permissions["deny"]
     assert "*" not in permissions["deny"]
     assert result["mcp_config"] == {"mcpServers": {"approved": {"command": "approved-server", "args": ["original"]}}}
     result["mcp_config"]["mcpServers"]["approved"]["args"].append("output")

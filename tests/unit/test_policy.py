@@ -92,3 +92,10 @@ def test_digest_is_canonical_for_unordered_grants(tmp_path):
         tools=["mcp", "web"],
     )
     assert resolve("edit-and-run", one).digest == resolve("edit-and-run", two).digest
+
+
+def test_digest_changes_with_inventory_tools(tmp_path):
+    one = grant(tmp_path)
+    two = grant(tmp_path, mcp_inventory={"server": {"command": "server", "tools": ["read", "write", "delete"]}})
+
+    assert resolve("edit-and-run", one).digest != resolve("edit-and-run", two).digest

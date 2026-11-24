@@ -1,7 +1,7 @@
 {
   "policy_version": 1,
   "policy_revision": "2026-11-23.1",
-  "policy_digest": "ca97cfadd99045388ab8733dcf3df7a871011764be6182ff22b1b91b2f577198",
+  "policy_digest": "54461ee7f6805824d3973fe883091ac45491fd8bde54e49dda54e0ab8a5221e3",
   "eligible": false,
   "ineligibility_reasons": [
     "The launcher and workspace restrictions have not been verified.",
