@@ -195,16 +195,26 @@ def child_within_parent(
     if (document.version, document.revision) != (parent.version, parent.revision):
         raise PolicyWidening("profile document differs from parent")
     child = resolve(profile, child_request, document)
-    if child.folder != parent.folder and parent.folder not in child.folder.parents:
-        raise PolicyWidening("folder outside parent folder")
-    if child.scratch_folder != parent.scratch_folder and parent.scratch_folder not in child.scratch_folder.parents:
-        raise PolicyWidening("scratch folder outside parent scratch folder")
     requested_classes = set(_strings(child_request.grants.get("tool_classes", ()), "tool_classes"))
     if not requested_classes <= parent.tool_classes:
         raise PolicyWidening("tool class not granted to parent")
     requested_tools = set(_strings(child_request.grants.get("tools", ()), "tools"))
     if not requested_tools <= parent.tools:
         raise PolicyWidening("tool not granted to parent")
+    validate_child_policy(parent, child)
+    return child
+
+
+def validate_child_policy(parent: EffectivePolicy, child: EffectivePolicy) -> None:
+    """Reject expansions in a resolved child, regardless of how it was supplied."""
+    if (child.version, child.revision) != (parent.version, parent.revision):
+        raise PolicyWidening("profile document differs from parent")
+    if not child.tool_classes <= parent.tool_classes or not child.tools <= parent.tools:
+        raise PolicyWidening("child capability not granted to parent")
+    if child.folder != parent.folder and parent.folder not in child.folder.parents:
+        raise PolicyWidening("folder outside parent folder")
+    if child.scratch_folder != parent.scratch_folder and parent.scratch_folder not in child.scratch_folder.parents:
+        raise PolicyWidening("scratch folder outside parent scratch folder")
     if child.network == "on" and parent.network == "off":
         raise PolicyWidening("network on under parent off")
     if not set(child.network_routes) <= set(parent.network_routes):
@@ -219,4 +229,3 @@ def child_within_parent(
             raise PolicyWidening("MCP server or tool not granted to parent")
         if {k: v for k, v in config.items() if k != "tools"} != {k: v for k, v in prior.items() if k != "tools"}:
             raise PolicyWidening("MCP server configuration differs from parent")
-    return child

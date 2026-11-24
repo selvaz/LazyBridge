@@ -8,8 +8,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
-from .models import EffectivePolicy, PolicyError, PolicyWidening, TaskGrant
-from .resolve import child_within_parent
+from .models import EffectivePolicy, PolicyError, TaskGrant
+from .resolve import child_within_parent, validate_child_policy
 
 
 @dataclass(frozen=True)
@@ -46,21 +46,7 @@ def resolve_invocation_policy(
     elif isinstance(configured, EffectivePolicy):
         effective = configured
         if parent is not None:
-            authority = parent.delegable_grants
-            if effective.folder != authority.folder and authority.folder not in effective.folder.parents:
-                raise PolicyWidening("folder outside parent folder")
-            if not effective.tool_classes <= authority.tool_classes or not effective.tools <= authority.tools:
-                raise PolicyWidening("child capability not granted to parent")
-            if effective.network == "on" and authority.network == "off":
-                raise PolicyWidening("network on under parent off")
-            if not set(effective.network_routes) <= set(authority.network_routes):
-                raise PolicyWidening("network route not granted to parent")
-            if effective.placement != authority.placement:
-                raise PolicyWidening("placement differs from parent")
-            for name, config in effective.mcp_servers.items():
-                prior = authority.mcp_servers.get(name)
-                if prior is None or not set(config["tools"]) <= set(prior["tools"]):
-                    raise PolicyWidening("MCP server or tool not granted to parent")
+            validate_child_policy(parent.delegable_grants, effective)
     else:
         raise TypeError("policy must be an EffectivePolicy, TaskGrant, or None")
     return effective, parent

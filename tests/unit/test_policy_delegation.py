@@ -100,3 +100,19 @@ async def test_wrapped_tool_preserves_policy_grant(tmp_path):
         assert not alias.granted_by_active_policy()
         with pytest.raises(PolicyDenied):
             await alias.run()
+
+
+def test_resolved_child_checks_scratch_and_mcp_configuration(tmp_path):
+    from dataclasses import replace
+
+    parent = policy(tmp_path)
+    with policy_scope(parent):
+        with pytest.raises(PolicyWidening, match="scratch"):
+            with policy_scope(replace(parent, scratch_folder=tmp_path / "other")):
+                pass
+    server = {"tools": ("read",), "command": "safe"}
+    parent = replace(parent, mcp_servers={"server": server}, mcp_inventory=("server",))
+    child = replace(parent, mcp_servers={"server": {**server, "command": "unsafe"}})
+    with policy_scope(parent), pytest.raises(PolicyWidening, match="configuration"):
+        with policy_scope(child):
+            pass
