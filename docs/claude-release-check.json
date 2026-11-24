@@ -1,0 +1,618 @@
+{
+  "schema": 1,
+  "checked_at": "2026-11-24T02:47:02.471522+00:00",
+  "launch_path": "AgentSdkClient/stdio",
+  "policy_version": 1,
+  "policy_revision": "2026-11-23.1",
+  "runtime_version": "2.1.283 (Claude Code) / Agent SDK 0.2.129",
+  "runtime_revision": "303faca0fc36c268cb5f988a7003e96acc783052328e1ad1cd6959755049766a",
+  "platform": "Windows-10-10.0.26100-SP0",
+  "matrix": [
+    {
+      "profile": "read",
+      "network": "off",
+      "tool_classes": [
+        "read"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": true,
+          "detail": "Model-facing inventory: Glob, Grep, Read. Unexpected tools: none."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+        },
+        "tool_discovery_and_call": {
+          "passed": true,
+          "detail": "Granted lookup discovered: False. Hidden tool discovered: False. Hidden direct call rejected: True."
+        },
+        "native_reads": {
+          "passed": true,
+          "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+        },
+        "native_writes": {
+          "passed": true,
+          "detail": "Scoped write created canary: False. Sibling write rejected: True. Sibling write created a file: False."
+        },
+        "shell_policy": {
+          "passed": true,
+          "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+        },
+        "shell_roots": {
+          "passed": true,
+          "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+        },
+        "shell_egress": {
+          "passed": true,
+          "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+        },
+        "tool_host_egress": {
+          "passed": true,
+          "detail": "Granted endpoint only: False. Both endpoints reachable: False."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "The native resume returned the original session ID."
+        },
+        "resume_effective_policy": {
+          "passed": true,
+          "detail": "Failed enforcement probes on resume: none.",
+          "probes": {
+            "isolated_config": {
+              "passed": true,
+              "detail": "Model-facing inventory: Glob, Grep, Read. Unexpected tools: none."
+            },
+            "ambient_mcp_absent": {
+              "passed": true,
+              "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+            },
+            "tool_discovery_and_call": {
+              "passed": true,
+              "detail": "Granted lookup discovered: False. Hidden tool discovered: False. Hidden direct call rejected: True."
+            },
+            "native_reads": {
+              "passed": true,
+              "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+            },
+            "native_writes": {
+              "passed": true,
+              "detail": "Scoped write created canary: False. Sibling write rejected: True. Sibling write created a file: False."
+            },
+            "shell_policy": {
+              "passed": true,
+              "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+            },
+            "shell_roots": {
+              "passed": true,
+              "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+            },
+            "shell_egress": {
+              "passed": true,
+              "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+            },
+            "tool_host_egress": {
+              "passed": true,
+              "detail": "Granted endpoint only: False. Both endpoints reachable: False."
+            }
+          }
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "Claude session does not match the current policy revision and grant."
+        },
+        "worker_isolation": {
+          "passed": false,
+          "detail": "The SDK inherits the launcher environment and has no verified confinement for managed settings or worker routes."
+        }
+      }
+    },
+    {
+      "profile": "read",
+      "network": "on",
+      "tool_classes": [
+        "read"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": false,
+          "detail": "Model-facing inventory: Glob, Grep, Read, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+        },
+        "tool_discovery_and_call": {
+          "passed": false,
+          "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+        },
+        "native_reads": {
+          "passed": true,
+          "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+        },
+        "native_writes": {
+          "passed": true,
+          "detail": "Scoped write created canary: False. Sibling write rejected: True. Sibling write created a file: False."
+        },
+        "shell_policy": {
+          "passed": true,
+          "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+        },
+        "shell_roots": {
+          "passed": true,
+          "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+        },
+        "shell_egress": {
+          "passed": true,
+          "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+        },
+        "tool_host_egress": {
+          "passed": false,
+          "detail": "Granted endpoint only: False. Both endpoints reachable: True."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "The native resume returned the original session ID."
+        },
+        "resume_effective_policy": {
+          "passed": false,
+          "detail": "Failed enforcement probes on resume: isolated_config, tool_discovery_and_call, tool_host_egress.",
+          "probes": {
+            "isolated_config": {
+              "passed": false,
+              "detail": "Model-facing inventory: Glob, Grep, Read, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+            },
+            "ambient_mcp_absent": {
+              "passed": true,
+              "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+            },
+            "tool_discovery_and_call": {
+              "passed": false,
+              "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+            },
+            "native_reads": {
+              "passed": true,
+              "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+            },
+            "native_writes": {
+              "passed": true,
+              "detail": "Scoped write created canary: False. Sibling write rejected: True. Sibling write created a file: False."
+            },
+            "shell_policy": {
+              "passed": true,
+              "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+            },
+            "shell_roots": {
+              "passed": true,
+              "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+            },
+            "shell_egress": {
+              "passed": true,
+              "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+            },
+            "tool_host_egress": {
+              "passed": false,
+              "detail": "Granted endpoint only: False. Both endpoints reachable: True."
+            }
+          }
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "Claude session does not match the current policy revision and grant."
+        },
+        "worker_isolation": {
+          "passed": false,
+          "detail": "The SDK inherits the launcher environment and has no verified confinement for managed settings or worker routes."
+        }
+      }
+    },
+    {
+      "profile": "edit",
+      "network": "off",
+      "tool_classes": [
+        "edit",
+        "read"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": true,
+          "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write. Unexpected tools: none."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+        },
+        "tool_discovery_and_call": {
+          "passed": true,
+          "detail": "Granted lookup discovered: False. Hidden tool discovered: False. Hidden direct call rejected: True."
+        },
+        "native_reads": {
+          "passed": true,
+          "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+        },
+        "native_writes": {
+          "passed": true,
+          "detail": "Scoped write created canary: True. Sibling write rejected: True. Sibling write created a file: False."
+        },
+        "shell_policy": {
+          "passed": true,
+          "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+        },
+        "shell_roots": {
+          "passed": true,
+          "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+        },
+        "shell_egress": {
+          "passed": true,
+          "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+        },
+        "tool_host_egress": {
+          "passed": true,
+          "detail": "Granted endpoint only: False. Both endpoints reachable: False."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "The native resume returned the original session ID."
+        },
+        "resume_effective_policy": {
+          "passed": true,
+          "detail": "Failed enforcement probes on resume: none.",
+          "probes": {
+            "isolated_config": {
+              "passed": true,
+              "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write. Unexpected tools: none."
+            },
+            "ambient_mcp_absent": {
+              "passed": true,
+              "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+            },
+            "tool_discovery_and_call": {
+              "passed": true,
+              "detail": "Granted lookup discovered: False. Hidden tool discovered: False. Hidden direct call rejected: True."
+            },
+            "native_reads": {
+              "passed": true,
+              "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+            },
+            "native_writes": {
+              "passed": true,
+              "detail": "Scoped write created canary: True. Sibling write rejected: True. Sibling write created a file: False."
+            },
+            "shell_policy": {
+              "passed": true,
+              "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+            },
+            "shell_roots": {
+              "passed": true,
+              "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+            },
+            "shell_egress": {
+              "passed": true,
+              "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+            },
+            "tool_host_egress": {
+              "passed": true,
+              "detail": "Granted endpoint only: False. Both endpoints reachable: False."
+            }
+          }
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "Claude session does not match the current policy revision and grant."
+        },
+        "worker_isolation": {
+          "passed": false,
+          "detail": "The SDK inherits the launcher environment and has no verified confinement for managed settings or worker routes."
+        }
+      }
+    },
+    {
+      "profile": "edit",
+      "network": "on",
+      "tool_classes": [
+        "edit",
+        "read"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": false,
+          "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+        },
+        "tool_discovery_and_call": {
+          "passed": false,
+          "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+        },
+        "native_reads": {
+          "passed": true,
+          "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+        },
+        "native_writes": {
+          "passed": true,
+          "detail": "Scoped write created canary: True. Sibling write rejected: True. Sibling write created a file: False."
+        },
+        "shell_policy": {
+          "passed": true,
+          "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+        },
+        "shell_roots": {
+          "passed": true,
+          "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+        },
+        "shell_egress": {
+          "passed": true,
+          "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+        },
+        "tool_host_egress": {
+          "passed": false,
+          "detail": "Granted endpoint only: False. Both endpoints reachable: True."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "The native resume returned the original session ID."
+        },
+        "resume_effective_policy": {
+          "passed": false,
+          "detail": "Failed enforcement probes on resume: isolated_config, tool_discovery_and_call, tool_host_egress.",
+          "probes": {
+            "isolated_config": {
+              "passed": false,
+              "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+            },
+            "ambient_mcp_absent": {
+              "passed": true,
+              "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+            },
+            "tool_discovery_and_call": {
+              "passed": false,
+              "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+            },
+            "native_reads": {
+              "passed": true,
+              "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+            },
+            "native_writes": {
+              "passed": true,
+              "detail": "Scoped write created canary: True. Sibling write rejected: True. Sibling write created a file: False."
+            },
+            "shell_policy": {
+              "passed": true,
+              "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+            },
+            "shell_roots": {
+              "passed": true,
+              "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+            },
+            "shell_egress": {
+              "passed": true,
+              "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+            },
+            "tool_host_egress": {
+              "passed": false,
+              "detail": "Granted endpoint only: False. Both endpoints reachable: True."
+            }
+          }
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "Claude session does not match the current policy revision and grant."
+        },
+        "worker_isolation": {
+          "passed": false,
+          "detail": "The SDK inherits the launcher environment and has no verified confinement for managed settings or worker routes."
+        }
+      }
+    },
+    {
+      "profile": "edit-and-run",
+      "network": "off",
+      "tool_classes": [
+        "edit",
+        "read",
+        "shell"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": true,
+          "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write. Unexpected tools: none."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+        },
+        "tool_discovery_and_call": {
+          "passed": true,
+          "detail": "Granted lookup discovered: False. Hidden tool discovered: False. Hidden direct call rejected: True."
+        },
+        "native_reads": {
+          "passed": true,
+          "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+        },
+        "native_writes": {
+          "passed": true,
+          "detail": "Scoped write created canary: True. Sibling write rejected: True. Sibling write created a file: False."
+        },
+        "shell_policy": {
+          "passed": false,
+          "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+        },
+        "shell_roots": {
+          "passed": false,
+          "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+        },
+        "shell_egress": {
+          "passed": false,
+          "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+        },
+        "tool_host_egress": {
+          "passed": true,
+          "detail": "Granted endpoint only: False. Both endpoints reachable: False."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "The native resume returned the original session ID."
+        },
+        "resume_effective_policy": {
+          "passed": false,
+          "detail": "Failed enforcement probes on resume: shell_egress, shell_policy, shell_roots.",
+          "probes": {
+            "isolated_config": {
+              "passed": true,
+              "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write. Unexpected tools: none."
+            },
+            "ambient_mcp_absent": {
+              "passed": true,
+              "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+            },
+            "tool_discovery_and_call": {
+              "passed": true,
+              "detail": "Granted lookup discovered: False. Hidden tool discovered: False. Hidden direct call rejected: True."
+            },
+            "native_reads": {
+              "passed": true,
+              "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+            },
+            "native_writes": {
+              "passed": true,
+              "detail": "Scoped write created canary: True. Sibling write rejected: True. Sibling write created a file: False."
+            },
+            "shell_policy": {
+              "passed": false,
+              "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+            },
+            "shell_roots": {
+              "passed": false,
+              "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+            },
+            "shell_egress": {
+              "passed": false,
+              "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+            },
+            "tool_host_egress": {
+              "passed": true,
+              "detail": "Granted endpoint only: False. Both endpoints reachable: False."
+            }
+          }
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "Claude session does not match the current policy revision and grant."
+        },
+        "worker_isolation": {
+          "passed": false,
+          "detail": "The SDK inherits the launcher environment and has no verified confinement for managed settings or worker routes."
+        }
+      }
+    },
+    {
+      "profile": "edit-and-run",
+      "network": "on",
+      "tool_classes": [
+        "edit",
+        "read",
+        "shell"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": false,
+          "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+        },
+        "tool_discovery_and_call": {
+          "passed": false,
+          "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+        },
+        "native_reads": {
+          "passed": true,
+          "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+        },
+        "native_writes": {
+          "passed": true,
+          "detail": "Scoped write created canary: True. Sibling write rejected: True. Sibling write created a file: False."
+        },
+        "shell_policy": {
+          "passed": false,
+          "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+        },
+        "shell_roots": {
+          "passed": false,
+          "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+        },
+        "shell_egress": {
+          "passed": false,
+          "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+        },
+        "tool_host_egress": {
+          "passed": false,
+          "detail": "Granted endpoint only: False. Both endpoints reachable: True."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "The native resume returned the original session ID."
+        },
+        "resume_effective_policy": {
+          "passed": false,
+          "detail": "Failed enforcement probes on resume: isolated_config, shell_egress, shell_policy, shell_roots, tool_discovery_and_call, tool_host_egress.",
+          "probes": {
+            "isolated_config": {
+              "passed": false,
+              "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+            },
+            "ambient_mcp_absent": {
+              "passed": true,
+              "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
+            },
+            "tool_discovery_and_call": {
+              "passed": false,
+              "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+            },
+            "native_reads": {
+              "passed": true,
+              "detail": "Scoped read returned canary: True. Sibling read rejected: True."
+            },
+            "native_writes": {
+              "passed": true,
+              "detail": "Scoped write created canary: True. Sibling write rejected: True. Sibling write created a file: False."
+            },
+            "shell_policy": {
+              "passed": false,
+              "detail": "Bash needs a positive scoped execution control for a shell grant. General shell absent and rejected: True."
+            },
+            "shell_roots": {
+              "passed": false,
+              "detail": "Sibling shell marker created: False. No scoped shell worker is configured."
+            },
+            "shell_egress": {
+              "passed": false,
+              "detail": "The shell route is closed only when the native tool is absent and the direct call fails."
+            },
+            "tool_host_egress": {
+              "passed": false,
+              "detail": "Granted endpoint only: False. Both endpoints reachable: True."
+            }
+          }
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "Claude session does not match the current policy revision and grant."
+        },
+        "worker_isolation": {
+          "passed": false,
+          "detail": "The SDK inherits the launcher environment and has no verified confinement for managed settings or worker routes."
+        }
+      }
+    }
+  ]
+}
