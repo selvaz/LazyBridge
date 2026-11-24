@@ -205,6 +205,24 @@ async def test_stream_restores_parent_policy_between_chunks(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_stream_holds_active_slot_until_closed(tmp_path):
+    class StreamEngine(CaptureEngine):
+        async def stream(self, env, **kwargs):
+            yield "one"
+            yield "two"
+
+    child = Agent(engine=StreamEngine(), name="stream")
+    other = MockAgent("done", name="other")
+    with policy_scope(policy(tmp_path), tree_budget=TreeBudget(max_active_children=1)):
+        stream = child.stream("x")
+        assert await anext(stream) == "one"
+        with pytest.raises(PolicyBudgetExceeded, match="max_active_children"):
+            await other.run("x")
+        await stream.aclose()
+        assert (await other.run("x")).ok
+
+
+@pytest.mark.asyncio
 async def test_mock_subclass_run_override_keeps_policy_in_plan(tmp_path):
     observed = []
 

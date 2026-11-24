@@ -127,6 +127,7 @@ def policy_scope(
     child_id: object | None = None,
     reserve_review: bool = False,
     work_units: int = 1,
+    bind: bool = True,
 ) -> Iterator[PolicyContext | None]:
     """Bind policy authority for exactly one agent invocation."""
 
@@ -147,11 +148,12 @@ def policy_scope(
         tree_budget=budget,
         depth=depth,
     )
-    token = _current.set(context)
+    token = _current.set(context) if bind else None
     try:
         yield context
     finally:
-        _current.reset(token)
+        if token is not None:
+            _current.reset(token)
         if admitted_id is not None:
             budget.release(admitted_id)
 

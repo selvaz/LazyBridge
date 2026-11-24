@@ -838,20 +838,20 @@ class Agent:
             child_id=self,
             reserve_review=getattr(self, "reserve_review", False),
             work_units=getattr(self, "work_units", 1),
+            bind=False,
         ) as invocation:
-            pass
-        gen = self._stream_scoped(task, images=images, audio=audio)
-        try:
-            while True:
-                try:
-                    with bind_policy_context(invocation):
-                        chunk = await gen.__anext__()
-                except StopAsyncIteration:
-                    return
-                yield chunk
-        finally:
-            with bind_policy_context(invocation):
-                await gen.aclose()
+            gen = self._stream_scoped(task, images=images, audio=audio)
+            try:
+                while True:
+                    try:
+                        with bind_policy_context(invocation):
+                            chunk = await gen.__anext__()
+                    except StopAsyncIteration:
+                        return
+                    yield chunk
+            finally:
+                with bind_policy_context(invocation):
+                    await gen.aclose()
 
     async def _stream_scoped(
         self, task: str | Envelope, *, images: list[Any] | None = None, audio: Any | None = None
