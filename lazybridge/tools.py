@@ -623,6 +623,7 @@ class Tool:
                 returns_envelope=obj.returns_envelope,
                 agent_memory=obj.agent_memory,
                 agent_store=obj.agent_store,
+                policy_grant=obj.policy_grant,
                 timeout=timeout if timeout is not None else obj.timeout,
             )
 

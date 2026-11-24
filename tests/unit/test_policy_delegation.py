@@ -89,3 +89,14 @@ async def test_plan_verifier_fallback_and_async_child_keep_context(tmp_path):
 
     await MockAgent(launch, name="background", policy=authority).run("x")
     assert observed and all(item == authority.digest for item in observed)
+
+
+@pytest.mark.asyncio
+async def test_wrapped_tool_preserves_policy_grant(tmp_path):
+    original = Tool(lambda: "edited", name="edit", policy_grant="edit")
+    alias = Tool.wrap(original, name="alias")
+    assert alias.policy_grant == "edit"
+    with policy_scope(policy(tmp_path)):
+        assert not alias.granted_by_active_policy()
+        with pytest.raises(PolicyDenied):
+            await alias.run()
