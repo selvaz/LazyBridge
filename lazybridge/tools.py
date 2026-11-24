@@ -365,7 +365,7 @@ class Tool:
         from lazybridge.policy import PolicyDenied, current_policy_context
 
         context = current_policy_context()
-        if context is None:
+        if context is None or context.effective_policy is None:
             return
         if self.policy_grant is None:
             raise PolicyDenied(self.name, "tool has no policy grant")

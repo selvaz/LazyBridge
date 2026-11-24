@@ -88,6 +88,21 @@ async def test_mock_agent_tree_budget_reaches_plan_and_grandchildren(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_budget_without_policy_enforces_limits_and_allows_tools():
+    child = MockAgent("child", name="child")
+    tool = Tool(lambda: "allowed", name="untagged")
+
+    async def invoke(_env):
+        assert await tool.run() == "allowed"
+        with pytest.raises(PolicyBudgetExceeded, match="max_total_children"):
+            await child.run("nested")
+        return "done"
+
+    root = MockAgent(invoke, tree_budget=TreeBudget(max_total_children=0))
+    assert (await root.run("work")).text() == "done"
+
+
+@pytest.mark.asyncio
 async def test_mock_agent_resume_reuses_total_child_slot(tmp_path):
     authority = policy(tmp_path)
     child = MockAgent("done", name="child")

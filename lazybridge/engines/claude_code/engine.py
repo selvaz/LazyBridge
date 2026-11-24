@@ -639,7 +639,7 @@ class ClaudeCodeEngine:
         tool_clock: ToolClock | None = None,
     ) -> ClaudeSdkOptions:
         context = current_policy_context()
-        if context is not None:
+        if context is not None and context.effective_policy is not None:
             policy = context.effective_policy
             if policy.placement != "local":
                 raise PolicyDenied("claude-code", "The Claude SDK requires local placement.")

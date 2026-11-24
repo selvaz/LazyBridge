@@ -81,8 +81,8 @@ class TreeBudget:
 class PolicyContext:
     """Authority carried by one invocation into all nested work."""
 
-    effective_policy: EffectivePolicy
-    delegable_grants: EffectivePolicy
+    effective_policy: EffectivePolicy | None
+    delegable_grants: EffectivePolicy | None
     invocation_id: str
     parent_invocation_id: str | None = None
     tree_budget: TreeBudget | None = None
@@ -107,12 +107,12 @@ def resolve_invocation_policy(
     if configured is None:
         return (parent.effective_policy, parent) if parent is not None else (None, None)
     if isinstance(configured, TaskGrant):
-        if parent is None:
+        if parent is None or parent.delegable_grants is None:
             raise PolicyError("a TaskGrant requires a parent policy context")
         effective = child_within_parent(parent.delegable_grants, configured)
     elif isinstance(configured, EffectivePolicy):
         effective = configured
-        if parent is not None:
+        if parent is not None and parent.delegable_grants is not None:
             validate_child_policy(parent.delegable_grants, effective)
     else:
         raise TypeError("policy must be an EffectivePolicy, TaskGrant, or None")
@@ -132,10 +132,10 @@ def policy_scope(
     """Bind policy authority for exactly one agent invocation."""
 
     effective, parent = resolve_invocation_policy(configured)
-    if effective is None:
+    budget = parent.tree_budget if parent is not None else tree_budget
+    if effective is None and budget is None:
         yield None
         return
-    budget = parent.tree_budget if parent is not None else tree_budget
     depth = parent.depth + 1 if parent is not None else 0
     admitted_id = child_id if parent is not None and budget is not None else None
     if admitted_id is not None:
