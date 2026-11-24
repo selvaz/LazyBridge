@@ -4,6 +4,7 @@ import importlib
 import json
 import tomllib
 from dataclasses import FrozenInstanceError, replace
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -19,6 +20,7 @@ from lazybridge.policy import (
     load_profiles,
     resolve,
 )
+from lazybridge.policy.claude_admission import LAUNCH_PATH, REQUIRED_PROBES
 
 ALL_CLASSES = ["read", "edit", "shell"]
 EXPECTED = {"read": {"read"}, "edit": {"read", "edit"}, "edit-and-run": set(ALL_CLASSES)}
@@ -167,3 +169,35 @@ def test_compiler_golden(engine: str, tmp_path: Path, monkeypatch) -> None:
     actual = compile_claude(policy) if engine == "claude" else compile_codex(policy)
     golden = Path(__file__).with_name("fixtures") / f"code_bridge_profiles_{engine}.json"
     assert actual == json.loads(golden.read_text())
+
+
+@pytest.mark.parametrize("defect", [None, "failed", "missing", "policy", "runtime"])
+def test_claude_admission_requires_complete_current_evidence(tmp_path, defect) -> None:
+    policy = resolve("edit", grant(tmp_path))
+    row = {
+        "profile": policy.profile,
+        "network": policy.network,
+        "status": "green",
+        "tool_classes": sorted(policy.tool_classes),
+        "probes": {name: {"passed": True} for name in REQUIRED_PROBES},
+    }
+    report = {
+        "schema": 1,
+        "launch_path": LAUNCH_PATH,
+        "runtime_revision": "runtime",
+        "policy_version": policy.version,
+        "policy_revision": policy.revision,
+        "checked_at": datetime.now(UTC).isoformat(),
+        "matrix": [row],
+    }
+    if defect == "failed":
+        row["probes"]["worker_isolation"]["passed"] = False
+    elif defect == "missing":
+        del row["probes"]["native_writes"]
+    elif defect == "policy":
+        report["policy_revision"] = "old-policy"
+    elif defect == "runtime":
+        report["runtime_revision"] = "old-runtime"
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert compile_claude(policy, release_report=path, runtime_revision="runtime")["eligible"] is (defect is None)

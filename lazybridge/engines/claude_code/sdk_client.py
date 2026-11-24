@@ -27,6 +27,7 @@ from lazybridge._asyncbridge import abandoned_tasks
 from lazybridge.engines._tool_clock import ToolClock, wait_with_tool_clock
 from lazybridge.engines.coding import ApprovalRequest, ask_approval, closing_iter
 from lazybridge.policy import PolicyDenied, compile_claude, current_policy_context
+from lazybridge.policy.claude_admission import runtime_revision
 
 from .protocol import ClaudeSdkClient, ClaudeSdkOptions, ClaudeSdkResult, ClaudeSdkStreamEvent, McpTool
 
@@ -472,10 +473,15 @@ class AgentSdkClient(ClaudeSdkClient):
         transport_factory: Callable[..., Any] | None = None,
         query_factory: Callable[[Any, Any, Any, float], AsyncIterator[Any]] | None = None,
         close_grace: float = _CLOSE_GRACE,
+        policy_release_report: Path | str | None = None,
     ) -> None:
         self._transport_factory = transport_factory
         self._query_factory = query_factory
         self._close_grace = close_grace
+        self._policy_release_report = (
+            Path(policy_release_report).resolve() if policy_release_report is not None else None
+        )
+        self._policy_sessions: dict[str, tuple[int, str, str]] = {}
 
     @staticmethod
     def _message_model(message: Any, current: str | None) -> str | None:
@@ -562,8 +568,9 @@ class AgentSdkClient(ClaudeSdkClient):
             warnings.filterwarnings("ignore", category=CanUseToolShadowedWarning)
             _shadow_warning_filtered = True
 
+        policy = options.effective_policy
         sdk_tools = []
-        for mcp_tool in options.mcp_tools:
+        for mcp_tool in options.mcp_tools if policy is None else ():
             # ``tool`` accepts a full JSON Schema dict, preserving the schema
             # LazyBridge already compiled rather than re-inferring it.
             @tool(mcp_tool.name, mcp_tool.description, mcp_tool.input_schema)
@@ -574,7 +581,6 @@ class AgentSdkClient(ClaudeSdkClient):
 
             sdk_tools.append(_handler)
 
-        policy = options.effective_policy
         compiled = compile_claude(policy) if policy is not None else None
         if compiled is not None:
             permissions = compiled["settings"]["permissions"]
@@ -879,19 +885,61 @@ class AgentSdkClient(ClaudeSdkClient):
             output_format=options.output_format,
         )
 
-    def _authorize_policy(self, options: ClaudeSdkOptions) -> None:
+    def _authorize_policy(self, options: ClaudeSdkOptions) -> Path | None:
         context = current_policy_context()
-        if context is not None and options.effective_policy != context.effective_policy:
+        policy = options.effective_policy
+        if context is not None and policy != context.effective_policy:
             raise PolicyDenied("claude-code", "The active policy did not reach the Claude SDK boundary.")
-        if options.effective_policy is not None:
-            compiled = compile_claude(options.effective_policy)
-            if not compiled["eligible"]:
-                raise PolicyDenied("claude-code", " ".join(compiled["ineligibility_reasons"]))
+        if policy is None:
+            if options.resume is not None and options.resume in self._policy_sessions:
+                raise PolicyDenied("claude-code", "A governed Claude session requires its active policy.")
+            return None
+        if policy.placement != "local":
+            raise PolicyDenied("claude-code", "The Claude SDK requires local placement.")
+        binding = (policy.version, policy.revision, policy.digest)
+        if options.resume is not None and self._policy_sessions.get(options.resume) != binding:
+            raise PolicyDenied("claude-code", "Claude session does not match the current policy revision and grant.")
+        return self._require_policy_evidence(options)
+
+    def _require_policy_evidence(self, options: ClaudeSdkOptions) -> Path | None:
+        policy = options.effective_policy
+        assert policy is not None
+        report = self._policy_release_report
+        binary = None
+        revision = None
+        if report is not None:
+            from claude_agent_sdk import ClaudeAgentOptions
+            from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+
+            if self._transport_factory is not None or self._query_factory is not None:
+                raise PolicyDenied("claude-code", "Custom SDK transports lack governed launch evidence.")
+            binary = Path(SubprocessCLITransport("", ClaudeAgentOptions())._find_cli()).resolve(strict=True)
+            if binary.is_relative_to(policy.folder) or report.is_relative_to(policy.folder):
+                raise PolicyDenied(
+                    "claude-code", "The executable and release report must be outside the assigned folder."
+                )
+            revision = runtime_revision(binary)
+        compiled = compile_claude(policy, release_report=report, runtime_revision=revision)
+        if not compiled["eligible"]:
+            raise PolicyDenied("claude-code", " ".join(compiled["ineligibility_reasons"]))
+        return binary
+
+    def _bind_policy_session(self, options: ClaudeSdkOptions, session_id: str | None) -> None:
+        policy = options.effective_policy
+        if policy is None or not session_id:
+            return
+        binding = (policy.version, policy.revision, policy.digest)
+        if self._policy_sessions.setdefault(session_id, binding) != binding:
+            raise PolicyDenied("claude-code", "Claude returned a session bound to another policy.")
 
     async def run(
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> ClaudeSdkResult:
-        self._authorize_policy(options)
+        executable = (
+            await asyncio.to_thread(self._authorize_policy, options)
+            if options.effective_policy
+            else self._authorize_policy(options)
+        )
         try:
             from claude_agent_sdk import ResultMessage
         except ImportError as exc:  # pragma: no cover
@@ -905,6 +953,8 @@ class AgentSdkClient(ClaudeSdkClient):
         )
         with _system_prompt_via_file(options) as cli_options:
             sdk_options = self._sdk_options(cli_options)
+            if executable is not None:
+                sdk_options = replace(sdk_options, cli_path=executable)
             async with closing_iter(
                 _with_stderr_tail(
                     _bounded_query(
@@ -936,6 +986,7 @@ class AgentSdkClient(ClaudeSdkClient):
                 session_id=final.session_id,
             )
 
+        self._bind_policy_session(options, final.session_id)
         usage = final.usage or {}
         return ClaudeSdkResult(
             # With ``output_format`` set, the CLI returns the schema-validated
@@ -981,7 +1032,11 @@ class AgentSdkClient(ClaudeSdkClient):
     async def stream(
         self, prompt: str, *, options: ClaudeSdkOptions, attachments: tuple[dict[str, Any], ...] = ()
     ) -> AsyncIterator[ClaudeSdkStreamEvent]:
-        self._authorize_policy(options)
+        executable = (
+            await asyncio.to_thread(self._authorize_policy, options)
+            if options.effective_policy
+            else self._authorize_policy(options)
+        )
         try:
             from claude_agent_sdk import ResultMessage, StreamEvent
         except ImportError as exc:  # pragma: no cover
@@ -998,11 +1053,14 @@ class AgentSdkClient(ClaudeSdkClient):
             else prompt
         )
         with _system_prompt_via_file(stream_options) as cli_options:
+            sdk_options = self._sdk_options(cli_options)
+            if executable is not None:
+                sdk_options = replace(sdk_options, cli_path=executable)
             async with closing_iter(
                 _with_stderr_tail(
                     _bounded_query(
                         sdk_prompt,
-                        self._sdk_options(cli_options),
+                        sdk_options,
                         stream_options.initialize_timeout,
                         stream_options.stream_idle_timeout,
                         stream_options.tool_clock,
@@ -1033,6 +1091,7 @@ class AgentSdkClient(ClaudeSdkClient):
                                 status=message.api_error_status,
                                 session_id=message.session_id,
                             )
+                        self._bind_policy_session(stream_options, message.session_id)
                         # Some SDK/CLI versions do not emit partial text for a short
                         # response. Yield the final response exactly once in that case.
                         if not saw_text:
