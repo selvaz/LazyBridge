@@ -8,19 +8,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
-
-- Start the Claude Code idle clock after the initialize handshake completes.
-- Preserve long-running Claude Code stream semantics: `request_timeout` is a
-  hard whole-call bound for buffered `run`, but does not cap a stream's total
-  lifetime. Streams bound only initialization with `initialize_timeout` and
-  subsequent idle gaps with `stream_idle_timeout`.
-
-## [1.8.13] - 2026-11-22
+## [1.9.0] - 2026-11-24
 
 ### Added
 
-- Claude Code initialization now has a configurable 120-second timeout and retries initialize control timeouts for buffered runs. Buffered runs share the request timeout across initialization, retries, and processing; streams use initialization and idle timeouts. Failures include a bounded CLI stderr tail when available, with stderr logged at debug level.
+- Add the core policy model with profiles, grants, no-widen delegation, and Claude Code and Codex compilers. (#252)
+- Add a typed, task-linked approval registry to `ApprovalQueue`. (#253)
+- Add Codex `web_search` modes and the shell feature flag to policy compilation. (#254)
+
+### Changed
+
+- Make agents and tools obey the core policy. (#255)
+- Govern Codex launches with a release check. (#256)
+- Govern Claude Code launches with a release check. (#257)
+
+Governed sessions remain ineligible until their release checks are green; both checks are red on Windows as of this release.
+
+### Fixed
+
+- Give Claude Code initialization a configurable timeout and retry behavior, start the idle clock after initialization, preserve long-running stream timeout semantics, and include bounded CLI stderr in failures. (#251)
+- Deny ungranted MCP inventory tools and bind them into the policy digest. (#258)
+- Explain Claude Code resume failures from the release check and refresh the report. (#259)
 
 ## [1.8.12] - 2026-11-22
 
