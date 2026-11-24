@@ -340,12 +340,13 @@ def test_key_creation_without_hard_links(tmp_path: Path, monkeypatch: pytest.Mon
         link_attempts.append(target)
         raise OSError(errno.EOPNOTSUPP, "Hard links are unavailable")
 
-    def check_exclusive_create(file: Path, flags: int, mode: int = 0o777, **kwargs: Any) -> int:
+    def check_exclusive_create(file: Path, flags: int, *args: Any, **kwargs: Any) -> int:
         if file == path:
             assert flags & os.O_CREAT
             assert flags & os.O_EXCL
+            mode = args[0] if args else kwargs.get("mode")
             assert mode == 0o600
-        return open_key(file, flags, mode, **kwargs)
+        return open_key(file, flags, *args, **kwargs)
 
     monkeypatch.setattr(os, "link", unsupported_link)
     monkeypatch.setattr(os, "open", check_exclusive_create)
@@ -382,8 +383,8 @@ def test_concurrent_reader_waits_for_exclusive_key_write(tmp_path: Path, monkeyp
     def unsupported_link(source: Path, target: Path) -> None:
         raise OSError(errno.EOPNOTSUPP, "Hard links are unavailable")
 
-    def pause_after_create(file: Path, flags: int, mode: int = 0o777, **kwargs: Any) -> int:
-        fd = open_key(file, flags, mode, **kwargs)
+    def pause_after_create(file: Path, flags: int, *args: Any, **kwargs: Any) -> int:
+        fd = open_key(file, flags, *args, **kwargs)
         if file == path:
             created.set()
             assert read_empty.wait(timeout=5)

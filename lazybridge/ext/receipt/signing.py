@@ -6,6 +6,7 @@ import base64
 import errno
 import hashlib
 import json
+import logging
 import os
 import time
 from contextlib import suppress
@@ -83,6 +84,7 @@ class IssuerKey:
             try:
                 os.link(candidate, path)
             except FileExistsError:
+                logging.getLogger(__name__).debug("Using the receipt issuer key created by a concurrent writer")
                 return
             except OSError as exc:
                 # FAT and some network filesystems do not support hard links.
