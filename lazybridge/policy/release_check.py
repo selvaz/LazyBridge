@@ -66,7 +66,7 @@ _COMMAND = """
 from pathlib import Path
 from urllib.request import urlopen
 import sys
-kind, value = sys.argv[1:]
+kind, value, payload = sys.argv[1:]
 if kind == "network":
     try:
         with urlopen(value, timeout=3) as response:
@@ -75,9 +75,17 @@ if kind == "network":
         raise SystemExit(str(exc)) from exc
 elif kind == "read":
     print(Path(value).read_text(encoding="utf-8"))
-else:
-    Path(value).write_text("task-canary" if folder == workspace else "sibling-canary", encoding="utf-8")
+elif kind == "write":
+    try:
+        Path(value).write_text(payload, encoding="utf-8")
+    except PermissionError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(3) from exc
 """
+
+
+def _command_args(kind: str, value: str, payload: str = "") -> list[str]:
+    return [sys.executable, "-c", _COMMAND, kind, value, payload]
 
 
 @contextmanager
@@ -240,35 +248,48 @@ async def _row(
                 if name not in observations:
                     observe(name, False, diagnostic(exc))
 
-        async def command(kind: str, value: str) -> tuple[bool, str]:
+        async def command(kind: str, value: str, payload: str = "") -> tuple[int | None, str]:
             try:
                 response = await request(
                     "command/exec",
                     {
-                        "command": [sys.executable, "-c", _COMMAND, kind, value],
+                        "command": _command_args(kind, value, payload),
                         "cwd": str(workspace),
                         "sandboxPolicy": thread["sandbox"],
                         "timeoutMs": 7000,
                     },
                 )
-                return response["exitCode"] == 0, (response.get("stdout") or response.get("stderr") or "")[:160]
+                return response["exitCode"], (response.get("stdout") or response.get("stderr") or "")[:160]
             except CodexRequestRejected as exc:
-                return False, diagnostic(exc)
+                return None, diagnostic(exc)
 
-        inside_read, control = await command("read", str(workspace / "read.txt"))
-        outside_read, _ = await command("read", str(sibling / "read.txt"))
-        inside_write, _ = await command("write", str(workspace / ".scratch" / "shell-write.txt"))
-        outside_write, _ = await command("write", str(sibling / "shell-write.txt"))
-        control_ok = inside_read and control.strip() == "task-canary"
+        async def write(path: Path, payload: str) -> bool | None:
+            path.unlink(missing_ok=True)
+            status, _ = await command("write", str(path), payload)
+            if status == 0 and path.is_file() and path.read_text(encoding="utf-8") == payload:
+                return True
+            if status == 3 and not path.exists():
+                return False
+            return None
+
+        inside_status, control = await command("read", str(workspace / "read.txt"))
+        outside_status, _ = await command("read", str(sibling / "read.txt"))
+        inside_write = await write(workspace / ".scratch" / "shell-write.txt", "task-write-canary")
+        outside_write = await write(sibling / "shell-write.txt", "sibling-write-canary")
+        control_ok = inside_status == 0 and control.strip() == "task-canary"
         expected_write = profile != "read"
         observe(
             "shell_roots",
-            control_ok and not outside_read and inside_write == expected_write and not outside_write,
-            f"Reads [task, sibling]: {[inside_read, outside_read]}. Writes [scratch, sibling]: "
+            control_ok
+            and outside_status not in (0, None)
+            and inside_write is expected_write
+            and outside_write is False,
+            f"Reads [task, sibling]: {[inside_status == 0, outside_status == 0]}. Writes [scratch, sibling]: "
             f"{[inside_write, outside_write]}. Control output: {' '.join(control.split())[:180]}",
         )
-        allowed_ok, allowed_output = await command("network", allowed)
-        outside_ok, outside_output = await command("network", outside)
+        allowed_status, allowed_output = await command("network", allowed)
+        outside_status, outside_output = await command("network", outside)
+        allowed_ok, outside_ok = allowed_status == 0, outside_status == 0
         expected_egress = network == "on" and "shell" in policy.tool_classes
         observe(
             "shell_egress",

@@ -64,6 +64,15 @@ send(method="turn/completed", params={"turn": {"id": "new", "status": "completed
 """
 
 
+def test_release_write_probe_writes_the_supplied_payload(tmp_path):
+    target = tmp_path / "scratch write.txt"
+    result = subprocess.run(
+        release_check._command_args("write", str(target), "write-control"), capture_output=True, timeout=5
+    )
+    assert result.returncode == 0, result.stderr
+    assert target.read_text(encoding="utf-8") == "write-control"
+
+
 def report_for(policy, runtime):
     return {
         "schema": 1,
