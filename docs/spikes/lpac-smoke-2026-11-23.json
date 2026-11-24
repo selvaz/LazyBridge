@@ -1,0 +1,36 @@
+{
+  "date_local": "2026-11-23",
+  "outcome": "blocked",
+  "conclusion": "The phase 1 LPAC assumption was not tested. The sandbox denied creation of the requested test root; the approved execution outside the sandbox had an elevated Windows token and the script stopped before creating any fixtures or profile.",
+  "elevation": {
+    "needed_for_lpac": null,
+    "needed_for_requested_directory_under_sandbox": "unknown; sandbox denied access",
+    "sandboxed_parent_elevated": false,
+    "approved_execution_parent_elevated": true
+  },
+  "attempts": [
+    {
+      "timestamp_utc": "2026-11-24T03:48:21.645175+00:00",
+      "environment": "workspace sandbox",
+      "failure": {"type": "PermissionError", "winerror": 5, "errno": 13, "operation": "create D:/work/_wt/lpac-smoke"},
+      "profile_created": false,
+      "cleanup_success": true
+    },
+    {
+      "timestamp_utc": "2026-11-24T03:49:06.252852+00:00",
+      "environment": "approved execution outside workspace sandbox",
+      "failure": {"type": "RuntimeError", "message": "Parent is elevated; refusing to run.", "winerror": null},
+      "profile_created": false,
+      "cleanup_success": true
+    }
+  ],
+  "checks": {
+    "granted_write_read": {"pass": false, "status": "not_run", "error": null},
+    "sibling_read_denied": {"pass": false, "status": "not_run", "error": null},
+    "sibling_write_denied": {"pass": false, "status": "not_run", "error": null},
+    "loopback_connect_denied": {"pass": false, "status": "not_run", "error": null},
+    "public_connect_denied": {"pass": false, "status": "not_run", "error": null}
+  },
+  "design_source": "Existing local ecosystem-ops checkout; requested git pull was rejected by automatic approval review.",
+  "script_note": "After these runs the script was adjusted to stage its child script in the granted directory and clean up an unexpectedly successful sibling write; no further LPAC attempt was made."
+}
