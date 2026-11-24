@@ -209,6 +209,7 @@ nav:
           - Coding agents in practice: guides/full/coding-agents.md
           - Claude Code writes, Codex reviews: guides/full/claude-writes-codex-reviews.md
           - Coding-agent permissions: guides/full/coding-agent-config.md
+          - Approval routing and cards: guides/full/approval-routing.md
           - Session aliases: guides/full/session-registry.md
           - Publication receipts: guides/full/publication-receipts.md
       - Advanced:

@@ -1,5 +1,6 @@
 """Engine-neutral execution and delegation policies."""
 
+from .cards import ApprovalCard, ApprovalTier, CardAction, CardMatcher, CardTier
 from .compile import compile_claude, compile_codex
 from .context import PolicyBudgetExceeded, PolicyContext, TreeBudget, current_policy_context, policy_scope
 from .models import EffectivePolicy, PolicyDenied, PolicyError, PolicyWidening, Profile, ProfileDocument, TaskGrant
@@ -14,6 +15,11 @@ from .review import (
 )
 
 __all__ = [
+    "ApprovalCard",
+    "ApprovalTier",
+    "CardAction",
+    "CardMatcher",
+    "CardTier",
     "EffectivePolicy",
     "PolicyError",
     "PolicyBudgetExceeded",

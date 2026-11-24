@@ -6,10 +6,12 @@ import hashlib
 import json
 import tomllib
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from .cards import ApprovalCard, validate_card_copy
 from .models import EffectivePolicy, PolicyError, PolicyWidening, Profile, ProfileDocument, TaskGrant
 
 TOOL_CLASSES = frozenset({"read", "edit", "shell"})
@@ -111,6 +113,46 @@ def _digest(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _base_digest(policy: EffectivePolicy) -> str:
+    return _digest(
+        {
+            "profile": policy.profile,
+            "version": policy.version,
+            "revision": policy.revision,
+            "folder": str(policy.folder),
+            "scratch_folder": str(policy.scratch_folder),
+            "tool_classes": sorted(policy.tool_classes),
+            "tools": sorted(policy.tools),
+            "network": policy.network,
+            "network_routes": list(policy.network_routes),
+            "placement": policy.placement,
+            "mcp_servers": _thaw(policy.mcp_servers),
+            "mcp_inventory": policy.mcp_inventory,
+            "mcp_inventory_tools": _thaw(policy.mcp_inventory_tools),
+        }
+    )
+
+
+def _with_policy_digest(policy: EffectivePolicy) -> EffectivePolicy:
+    digest = _base_digest(policy)
+    hand = tuple(sorted(policy.approval_cards, key=lambda card: card.card_id))
+    if policy.approval_authority or hand:
+        digest = _digest(
+            {
+                "base": digest,
+                "approval_authority": sorted(policy.approval_authority),
+                "approval_cards": [card.model_dump(mode="json") for card in hand],
+            }
+        )
+    return replace(policy, digest=digest, approval_cards=hand)
+
+
+def _without_approvals(policy: EffectivePolicy) -> EffectivePolicy:
+    if not policy.approval_authority and not policy.approval_cards:
+        return policy
+    return replace(policy, approval_authority=frozenset(), approval_cards=(), digest=_base_digest(policy))
+
+
 def resolve(
     profile: str, grant: TaskGrant, document: ProfileDocument | None = None, *, strict: bool = False
 ) -> EffectivePolicy:
@@ -188,22 +230,13 @@ def _resolve(
     if grant.network == "off":
         tools = tools - {"web", "mcp"}
         servers = MappingProxyType({})
-    canonical = {
-        "profile": profile,
-        "version": document.version,
-        "revision": document.revision,
-        "folder": str(folder),
-        "scratch_folder": str(scratch),
-        "tool_classes": sorted(classes),
-        "tools": sorted(tools),
-        "network": grant.network,
-        "network_routes": list(routes),
-        "placement": grant.placement,
-        "mcp_servers": _thaw(servers),
-        "mcp_inventory": inventory,
-        "mcp_inventory_tools": _thaw(inventory_tools),
-    }
-    return EffectivePolicy(
+    authority = frozenset(_strings(grant.approval_authority, "approval_authority"))
+    if any(not action_class.strip() for action_class in authority):
+        raise PolicyError("approval authority requires nonblank action classes")
+    hand = tuple(ApprovalCard.model_validate(card) for card in grant.approval_cards)
+    if len({card.card_id for card in hand}) != len(hand):
+        raise PolicyError("approval hand contains duplicate card IDs")
+    effective = EffectivePolicy(
         profile,
         document.version,
         document.revision,
@@ -217,10 +250,13 @@ def _resolve(
         servers,
         inventory,
         inventory_tools,
-        _digest(canonical),
+        "",
         removed_grants=removed_grants,
         _document=document,
+        approval_authority=authority,
+        approval_cards=hand,
     )
+    return _with_policy_digest(effective)
 
 
 def child_within_parent(
@@ -276,6 +312,14 @@ def validate_child_policy(parent: EffectivePolicy, child: EffectivePolicy) -> No
         raise PolicyWidening("profile document differs from parent")
     if not child.tool_classes <= parent.tool_classes or not child.tools <= parent.tools:
         raise PolicyWidening("child capability not granted to parent")
+    if not child.approval_authority <= parent.approval_authority:
+        raise PolicyWidening("approval authority not granted to parent")
+    held = {card.card_id: card for card in parent.approval_cards}
+    for card in child.approval_cards:
+        source = held.get(card.provenance[-1]) if card.provenance else None
+        if source is None:
+            raise PolicyWidening("parent does not hold the source approval card")
+        validate_card_copy(source, card)
     # A supplied EffectivePolicy can carry paths that did not go through _resolve.
     folder, scratch = child.folder, child.scratch_folder
     if not folder.is_relative_to(parent.folder) or not folder.resolve().is_relative_to(parent.folder):

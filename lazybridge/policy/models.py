@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .cards import ApprovalCard
+
 
 class PolicyError(ValueError):
     """Raised when a profile document or task grant is invalid."""
@@ -43,6 +45,8 @@ class TaskGrant:
     grants: Mapping[str, Any]
     network: str
     placement: str
+    approval_authority: frozenset[str] = frozenset()
+    approval_cards: tuple[ApprovalCard, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -65,3 +69,5 @@ class EffectivePolicy:
     digest: str
     removed_grants: tuple[tuple[str, str], ...] = field(default=(), compare=False)
     _document: ProfileDocument | None = field(default=None, compare=False, repr=False)
+    approval_authority: frozenset[str] = frozenset()
+    approval_cards: tuple[ApprovalCard, ...] = ()

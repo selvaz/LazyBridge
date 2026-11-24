@@ -10,8 +10,14 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import RLock
 
-from .models import EffectivePolicy, PolicyError, TaskGrant
-from .resolve import _read_only_review_policy, child_within_parent, validate_child_policy
+from .models import EffectivePolicy, PolicyError, PolicyWidening, TaskGrant
+from .resolve import (
+    _read_only_review_policy,
+    _with_policy_digest,
+    _without_approvals,
+    child_within_parent,
+    validate_child_policy,
+)
 from .review import ReviewIndependence, ReviewMode, ReviewSelection, select_reviewer
 
 
@@ -151,6 +157,13 @@ class PolicyContext:
     tree_budget: TreeBudget | None = None
     depth: int = 0
     review_independence: ReviewIndependence | None = None
+    parent: PolicyContext | None = field(default=None, repr=False, compare=False)
+    approval_actor: str | None = None
+
+    @property
+    def actor(self) -> str:
+        """Identity used for approval routing, defaulting to this invocation."""
+        return self.approval_actor or self.invocation_id
 
 
 _current: ContextVar[PolicyContext | None] = ContextVar("lazybridge_policy_context", default=None)
@@ -181,7 +194,8 @@ def resolve_invocation_policy(
 
     parent = _current.get()
     if configured is None:
-        return (parent.effective_policy, parent) if parent is not None else (None, None)
+        inherited = parent.effective_policy if parent is not None else None
+        return (_without_approvals(inherited) if inherited is not None else None), parent
     if isinstance(configured, TaskGrant):
         if parent is None or parent.delegable_grants is None:
             raise PolicyError("a TaskGrant requires a parent policy context")
@@ -190,6 +204,10 @@ def resolve_invocation_policy(
         effective = configured
         if parent is not None and parent.delegable_grants is not None:
             validate_child_policy(parent.delegable_grants, effective)
+        if effective.approval_authority or effective.approval_cards:
+            if parent is not None and parent.delegable_grants is None:
+                raise PolicyWidening("approval authority requires a parent grant")
+            effective = _with_policy_digest(effective)
     else:
         raise TypeError("policy must be an EffectivePolicy, TaskGrant, or None")
     return effective, parent
@@ -208,9 +226,12 @@ def policy_scope(
     engine: str | None = None,
     fresh: bool = False,
     read_only_review: bool = False,
+    approval_actor: str | None = None,
 ) -> Iterator[PolicyContext | None]:
     """Bind policy authority for exactly one agent invocation."""
 
+    if approval_actor is not None and not approval_actor.strip():
+        raise PolicyError("approval actor must be nonblank")
     effective, parent = resolve_invocation_policy(configured)
     if read_only_review and effective is not None:
         effective = _read_only_review_policy(effective)
@@ -239,6 +260,8 @@ def policy_scope(
         tree_budget=budget,
         depth=depth,
         review_independence=independence,
+        parent=parent,
+        approval_actor=approval_actor,
     )
     token = _current.set(context) if bind else None
     try:
