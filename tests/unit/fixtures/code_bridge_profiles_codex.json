@@ -6,13 +6,14 @@
   "ineligibility_reasons": [
     "The launcher has not verified the isolated CODEX_HOME and excluded project configuration.",
     "Scoped shell commands are not enforced by this configuration.",
-    "MCP server definitions and per-tool restrictions are not enforced by this configuration.",
+    "MCP tool filtering and tool-host confinement require native verification.",
     "Network route restrictions are not enforced by this configuration."
   ],
-  "codex_home_config_toml": "sandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\nweb_search = \"live\"\n[sandbox_workspace_write]\nnetwork_access = true\nwritable_roots = [\"/workspace/example-task\", \"/workspace/example-task/.scratch\"]\n[mcp_servers.\"approved\"]\nenabled = true\n[mcp_servers.\"rogue\"]\nenabled = false\n",
+  "codex_home_config_toml": "sandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\nweb_search = \"live\"\nsandbox_workspace_write = { \"network_access\" = true, \"writable_roots\" = [\"/workspace/example-task\", \"/workspace/example-task/.scratch\"] }\nmcp_servers = { \"approved\" = { \"command\" = \"approved-server\", \"enabled\" = true, \"enabled_tools\" = [\"lookup\"] }, \"rogue\" = { \"enabled\" = false } }\n",
   "config_overrides": {
     "sandbox_mode": "workspace-write",
     "approval_policy": "never",
+    "web_search": "live",
     "sandbox_workspace_write": {
       "network_access": true,
       "writable_roots": [
@@ -22,12 +23,15 @@
     },
     "mcp_servers": {
       "approved": {
-        "enabled": true
+        "command": "approved-server",
+        "enabled": true,
+        "enabled_tools": [
+          "lookup"
+        ]
       },
       "rogue": {
         "enabled": false
       }
-    },
-    "web_search": "live"
+    }
   }
 }

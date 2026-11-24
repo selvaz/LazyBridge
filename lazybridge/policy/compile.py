@@ -58,7 +58,22 @@ def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
             "network_access": policy.network == "on",
             "writable_roots": [str(policy.folder), str(policy.scratch_folder)] if writable else [],
         },
-        "mcp_servers": {name: {"enabled": name in policy.mcp_servers} for name in policy.mcp_inventory},
+        "mcp_servers": {
+            name: (
+                {
+                    **{
+                        key: _thaw(value)
+                        for key, value in policy.mcp_servers[name].items()
+                        if key not in {"tools", "enabled", "enabled_tools", "disabled_tools"}
+                    },
+                    "enabled": True,
+                    "enabled_tools": list(policy.mcp_servers[name]["tools"]),
+                }
+                if name in policy.mcp_servers
+                else {"enabled": False}
+            )
+            for name in policy.mcp_inventory
+        },
     }
     reasons = ["The launcher has not verified the isolated CODEX_HOME and excluded project configuration."]
     if "shell" not in policy.tool_classes:
@@ -67,29 +82,23 @@ def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
     else:
         reasons.append("Scoped shell commands are not enforced by this configuration.")
     if policy.mcp_servers:
-        reasons.append("MCP server definitions and per-tool restrictions are not enforced by this configuration.")
+        reasons.append("MCP tool filtering and tool-host confinement require native verification.")
     if policy.network_routes:
         reasons.append("Network route restrictions are not enforced by this configuration.")
 
-    def quote(value: object) -> str:
-        return json.dumps(value, ensure_ascii=True)
-
-    lines = [
-        f"sandbox_mode = {quote(overrides['sandbox_mode'])}",
-        'approval_policy = "never"',
-        f"web_search = {quote(overrides['web_search'])}",
-        "[sandbox_workspace_write]",
-        f"network_access = {str(policy.network == 'on').lower()}",
-        f"writable_roots = {quote(overrides['sandbox_workspace_write']['writable_roots'])}",
-    ]
-    if "features" in overrides:
-        lines.extend(["[features]", "shell_tool = false"])
-    for name, config in overrides["mcp_servers"].items():
-        lines.extend([f"[mcp_servers.{quote(name)}]", f"enabled = {str(config['enabled']).lower()}"])
     return {
         **_metadata(policy),
         "eligible": False,
         "ineligibility_reasons": reasons,
-        "codex_home_config_toml": "\n".join(lines) + "\n",
+        "codex_home_config_toml": "".join(f"{key} = {_toml_value(value)}\n" for key, value in overrides.items()),
         "config_overrides": overrides,
     }
+
+
+def _toml_value(value: Any) -> str:
+    """Encode the JSON-shaped values used by Codex config, including quoted keys."""
+    if isinstance(value, dict):
+        return "{ " + ", ".join(f"{_toml_value(key)} = {_toml_value(item)}" for key, item in value.items()) + " }"
+    if isinstance(value, list):
+        return "[" + ", ".join(map(_toml_value, value)) + "]"
+    return json.dumps(value, ensure_ascii=False, allow_nan=False).replace("\x7f", r"\u007f")
