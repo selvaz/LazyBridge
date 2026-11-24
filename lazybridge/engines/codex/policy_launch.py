@@ -14,6 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 from shutil import rmtree
 from typing import Any
+from uuid import UUID
 
 from lazybridge.policy import EffectivePolicy, PolicyDenied, compile_codex
 
@@ -84,13 +85,19 @@ class PolicyLaunch:
 
     @contextmanager
     def home(
-        self, thread_id: str | None, durable: bool, state: Path | None, api_key: str | None
+        self,
+        thread_id: str | None,
+        durable: bool,
+        state: Path | None,
+        api_key: str | None,
+        credential_id: UUID | None = None,
     ) -> Iterator[tuple[Path, dict[str, str]]]:
-        identity = hashlib.sha256((api_key or "").encode()).hexdigest()
+        if durable and api_key is not None and not isinstance(credential_id, UUID):
+            raise PolicyDenied("codex", "Durable API-key sessions require an executor-assigned credential UUID.")
         binding = {
             "admission_id": self.compiled["admission_id"],
             "policy_digest": self.policy.digest,
-            "credential_digest": identity,
+            "credential_id": str(credential_id) if api_key is not None and credential_id is not None else None,
         }
         if durable:
             if state is None:

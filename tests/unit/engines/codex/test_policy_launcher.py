@@ -7,14 +7,15 @@ import sys
 import tomllib
 from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
 from lazybridge import Agent, CodexEngine, Tool
 from lazybridge.engines.codex import app_server
 from lazybridge.engines.codex.app_server import CodexAppServerClient
-from lazybridge.engines.codex.policy_launch import runtime_revision
-from lazybridge.policy import TaskGrant, compile_codex, load_profiles, release_check, resolve
+from lazybridge.engines.codex.policy_launch import PolicyLaunch, runtime_revision
+from lazybridge.policy import PolicyDenied, TaskGrant, compile_codex, load_profiles, release_check, resolve
 from lazybridge.policy.codex_admission import LAUNCH_PATH, REQUIRED_PROBES
 
 THREAD = "01020304-0102-0304-0102-010203040506"
@@ -71,6 +72,42 @@ def test_release_write_probe_writes_the_supplied_payload(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert target.read_text(encoding="utf-8") == "write-control"
+
+
+def test_durable_threads_bind_an_executor_credential_id(tmp_path):
+    policy = resolve("read", TaskGrant(tmp_path / "task", {"tool_classes": ["read"]}, "off", "local"))
+    compiled = compile_codex(policy)
+    state = tmp_path / "state"
+    credential_id = uuid4()
+
+    with (
+        pytest.raises(PolicyDenied, match="credential UUID"),
+        PolicyLaunch(policy, compiled, sys.executable).home(None, True, state, "test-value"),
+    ):
+        pytest.fail("Durable launch accepted an API key without an identity.")
+
+    launch = PolicyLaunch(policy, compiled, sys.executable)
+    with launch.home(None, True, state, "test-value", credential_id) as (home, env):
+        assert env["OPENAI_API_KEY"] == "test-value"
+        launch.bind_thread(THREAD)
+    record = json.loads((state / f"{THREAD}.json").read_text(encoding="utf-8"))
+    assert record == {
+        "admission_id": compiled["admission_id"],
+        "policy_digest": policy.digest,
+        "credential_id": str(credential_id),
+        "home": home.name,
+    }
+    with PolicyLaunch(policy, compiled, sys.executable).home(THREAD, True, state, "rotated-value", credential_id) as (
+        resumed_home,
+        _,
+    ):
+        assert resumed_home == home
+    for key, identity in (("test-value", uuid4()), (None, None)):
+        with (
+            pytest.raises(PolicyDenied, match="current admission"),
+            PolicyLaunch(policy, compiled, sys.executable).home(THREAD, True, state, key, identity),
+        ):
+            pytest.fail("Resume accepted a different credential identity.")
 
 
 def report_for(policy, runtime):

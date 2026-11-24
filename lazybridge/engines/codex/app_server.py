@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from lazybridge._asyncbridge import abandoned_tasks
 from lazybridge.engines.coding import ApprovalGate, ApprovalRequest, ask_approval
@@ -514,6 +515,7 @@ class CodexAppServerClient:
         policy_release_report: Path | str | None = None,
         policy_state_dir: Path | str | None = None,
         policy_api_key: str | None = None,
+        policy_credential_id: UUID | None = None,
     ) -> None:
         #: Resolved lazily so importing the package never touches the
         #: filesystem and a missing CLI surfaces at run() time, as a normal
@@ -522,6 +524,9 @@ class CodexAppServerClient:
         self.policy_release_report = Path(policy_release_report) if policy_release_report is not None else None
         self.policy_state_dir = Path(policy_state_dir) if policy_state_dir is not None else None
         self._policy_api_key = policy_api_key
+        # Resolve this UUID alongside the credential in the executor. It is
+        # independent of the API key and can survive rotation for one identity.
+        self.policy_credential_id = policy_credential_id
 
     def _spawn_command(self, config_overrides: tuple[str, ...] = ()) -> tuple[str, ...]:
         """The argv for this run's App Server, per-agent overrides included.
@@ -718,7 +723,11 @@ class CodexAppServerClient:
         """Shared production and offline-model release-check launch path."""
         thread_id = kwargs.get("thread_id")
         with launch.home(
-            thread_id, bool(thread_id) or not kwargs.get("ephemeral", True), self.policy_state_dir, self._policy_api_key
+            thread_id,
+            bool(thread_id) or not kwargs.get("ephemeral", True),
+            self.policy_state_dir,
+            self._policy_api_key,
+            self.policy_credential_id,
         ) as (home, env):
             return await self._run_with_startup_retry(
                 **{
