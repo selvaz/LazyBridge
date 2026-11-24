@@ -245,9 +245,11 @@ def test_verify_context_does_not_shift_positional_parameters():
 
     from lazybridge import Agent
 
-    params = list(inspect.signature(Agent.__init__).parameters)
-    assert params.index("verify_context") == len(params) - 1
-    assert params.index("name") == params.index("max_verify") + 1
+    signature = inspect.signature(Agent.__init__)
+    positional = [p.name for p in signature.parameters.values() if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD]
+    assert positional[-1] == "verify_context"
+    assert positional.index("name") == positional.index("max_verify") + 1
+    assert signature.parameters["policy"].kind == inspect.Parameter.KEYWORD_ONLY
 
 
 @pytest.mark.parametrize(

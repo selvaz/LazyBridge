@@ -1,7 +1,8 @@
 """Engine-neutral execution and delegation policies."""
 
 from .compile import compile_claude, compile_codex
-from .models import EffectivePolicy, PolicyError, PolicyWidening, Profile, ProfileDocument, TaskGrant
+from .context import PolicyContext, current_policy_context, policy_scope
+from .models import EffectivePolicy, PolicyDenied, PolicyError, PolicyWidening, Profile, ProfileDocument, TaskGrant
 from .resolve import child_within_parent, load_profiles, resolve
 
 
@@ -21,6 +22,8 @@ def opposite_engine_reviewer(writer_engine: str) -> str:
 __all__ = [
     "EffectivePolicy",
     "PolicyError",
+    "PolicyDenied",
+    "PolicyContext",
     "PolicyWidening",
     "Profile",
     "ProfileDocument",
@@ -28,7 +31,9 @@ __all__ = [
     "child_within_parent",
     "compile_claude",
     "compile_codex",
+    "current_policy_context",
     "load_profiles",
     "opposite_engine_reviewer",
+    "policy_scope",
     "resolve",
 ]

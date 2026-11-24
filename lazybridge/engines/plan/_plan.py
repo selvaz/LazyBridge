@@ -1006,6 +1006,10 @@ class Plan(CheckpointMixin, ResolveMixin, FanoutMixin):
                 tool = tool_map.get(target)
                 if tool is None:
                     raise RuntimeError(f"Tool {target!r} not found")
+                # Plan may call an agent wrapper's ``func`` directly to retain
+                # its complete Envelope. Keep the authorization boundary even
+                # on that optimized path.
+                tool.require_policy_grant()
                 if getattr(tool, "agent_target", None) is not None:
                     # Agent tools have a deliberately richer wrapper than the
                     # bare target: verification, alias output publication and

@@ -14,6 +14,7 @@ from lazybridge.tools import Tool, ToolProvider, build_tool_map, check_timeout
 
 if TYPE_CHECKING:
     from lazybridge.core.providers.base import Tier
+    from lazybridge.policy import EffectivePolicy, TaskGrant
 
 
 _calling_session: ContextVar[Any | None] = ContextVar("lazybridge_calling_session", default=None)
@@ -191,6 +192,8 @@ class Agent:
         cache: bool | Any = False,
         # Last on purpose: never shift an existing positional parameter.
         verify_context: bool = False,
+        *,
+        policy: EffectivePolicy | TaskGrant | None = None,
     ) -> None:
         # ``name`` is "explicit" when the caller supplied a real string
         # value (not None / blank).  Used downstream to require a name
@@ -270,6 +273,7 @@ class Agent:
             self.engine.native_tools = existing
 
         self._tools_raw = list(tools or [])
+        self.policy = policy
         # Validate before building the tool map so errors surface early with
         # the agent's current name rather than a wrapped Tool name.
         for _raw in self._tools_raw:
@@ -467,11 +471,12 @@ class Agent:
         raised inside must propagate past this level up to the originating
         top-level :meth:`run`.
         """
+        from lazybridge.policy.context import policy_scope
         from lazybridge.signals import ConcludeSignal
 
         timeout = getattr(self, "timeout", None)
         guard = getattr(self, "guard", None)
-        with _guarded_output() if guard else nullcontext():
+        with policy_scope(getattr(self, "policy", None)), _guarded_output() if guard else nullcontext():
             try:
                 if timeout is None:
                     return await self._run_body(
@@ -522,6 +527,10 @@ class Agent:
                         # replace the timeout error returned below.
                         pass
                 return Envelope.error_envelope(TimeoutError(f"Agent.run() exceeded timeout={timeout}s"))
+
+    def _available_tools(self) -> list[Tool]:
+        """Return only capabilities granted in the active policy context."""
+        return [tool for tool in self._tool_map.values() if tool.granted_by_active_policy()]
 
     async def _run_body(
         self,
@@ -654,7 +663,7 @@ class Agent:
         try:
             result = await self.engine.run(
                 env,
-                tools=list(self._tool_map.values()),
+                tools=self._available_tools(),
                 output_type=self.output,
                 memory=self.memory,
                 session=effective_session,
@@ -717,7 +726,7 @@ class Agent:
                 try:
                     current = await self.engine.run(
                         _feedback_env(original_env, feedback),
-                        tools=list(self._tool_map.values()),
+                        tools=self._available_tools(),
                         output_type=self.output,
                         memory=None,
                         session=self.session,
@@ -809,6 +818,26 @@ class Agent:
         Multimodal: pass ``images=`` / ``audio=`` to attach blocks to
         the streamed turn — same coercion semantics as :meth:`run`.
         """
+        from lazybridge.policy.context import bind_policy_context, policy_scope
+
+        with policy_scope(getattr(self, "policy", None)) as invocation:
+            pass
+        gen = self._stream_scoped(task, images=images, audio=audio)
+        try:
+            while True:
+                try:
+                    with bind_policy_context(invocation):
+                        chunk = await gen.__anext__()
+                except StopAsyncIteration:
+                    return
+                yield chunk
+        finally:
+            with bind_policy_context(invocation):
+                await gen.aclose()
+
+    async def _stream_scoped(
+        self, task: str | Envelope, *, images: list[Any] | None = None, audio: Any | None = None
+    ) -> AsyncGenerator[str, None]:
         guard = self.guard
         with _guarded_output() if guard else nullcontext():
             env = self._inject_sources(self._to_envelope(task, images=images, audio=audio))
@@ -880,7 +909,7 @@ class Agent:
 
         gen = self.engine.stream(
             env,
-            tools=list(self._tool_map.values()),
+            tools=self._available_tools(),
             output_type=self.output,
             memory=self.memory,
             session=self.session,
@@ -1146,6 +1175,7 @@ class Agent:
             output_validator=self.output_validator,
             max_output_retries=self.max_output_retries,
             fallback=self.fallback,
+            policy=self.policy,
         )
         base_kwargs.update(overrides)
         derived = Agent(**base_kwargs)
