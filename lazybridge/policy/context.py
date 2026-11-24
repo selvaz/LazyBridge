@@ -3,23 +3,127 @@
 from __future__ import annotations
 
 import uuid
+from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import RLock
 
 from .models import EffectivePolicy, PolicyError, TaskGrant
 from .resolve import child_within_parent, validate_child_policy
+
+
+class PolicyBudgetExceeded(PolicyError):
+    """Raised when admitting work would exceed a tree-wide bound."""
+
+    def __init__(self, bound: str, limit: int) -> None:
+        self.bound = bound
+        self.limit = limit
+        super().__init__(f"tree policy budget exceeded: {bound}={limit}")
+
+
+@dataclass
+class TreeBudget:
+    """Shared, concurrency-safe admission budget for an invocation tree.
+
+    Child identities are registered for the lifetime of the budget, so a
+    later resume of the same child reuses its total/work-unit slot.
+    """
+
+    max_depth: int | None = None
+    max_active_children: int | None = None
+    max_total_children: int | None = None
+    max_work_units: int | None = None
+    _children: set[object] = field(default_factory=set, init=False, repr=False)
+    _active: Counter[object] = field(default_factory=Counter, init=False, repr=False)
+    _work_units: int = field(default=0, init=False, repr=False)
+    _review_reservations: dict[object, str] = field(default_factory=dict, init=False, repr=False)
+    _lock: RLock = field(default_factory=RLock, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        for name in ("max_depth", "max_active_children", "max_total_children", "max_work_units"):
+            value = getattr(self, name)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                raise ValueError(f"{name} must be a non-negative integer or None")
+
+    def admit(
+        self,
+        child_id: object,
+        *,
+        depth: int,
+        reserve_review: bool = False,
+        work_units: int = 1,
+        role: str | None = None,
+        engine: str | None = None,
+    ) -> None:
+        """Atomically admit a child, or raise without changing counters."""
+        if work_units < 0:
+            raise ValueError("work_units must be non-negative")
+        if role not in (None, "reviewer"):
+            raise ValueError("role must be reviewer or None")
+        if reserve_review and role is not None:
+            raise ValueError("a reviewer cannot reserve a review")
+        opposite = None
+        if reserve_review or role == "reviewer":
+            from . import opposite_engine_reviewer
+
+            if engine not in ("claude", "codex"):
+                raise PolicyError("review reservations require a claude or codex engine")
+            opposite = opposite_engine_reviewer(engine)
+        with self._lock:
+            is_new = child_id not in self._children
+            becomes_active = not self._active.get(child_id, 0)
+            active_limit = self.max_active_children
+            if self.max_depth is not None and depth > self.max_depth:
+                raise PolicyBudgetExceeded("max_depth", self.max_depth)
+            reservation = next(
+                (
+                    writer
+                    for writer, expected in self._review_reservations.items()
+                    if role == "reviewer" and expected == engine and writer != child_id
+                ),
+                None,
+            )
+            new_reservation = reserve_review and child_id not in self._review_reservations
+            if active_limit is not None and (becomes_active or new_reservation):
+                occupied = len(self._active) + len(self._review_reservations) + int(new_reservation)
+                if reservation is not None and becomes_active:
+                    occupied -= 1
+                if occupied + int(becomes_active) > active_limit:
+                    raise PolicyBudgetExceeded("max_active_children", active_limit)
+            if is_new and self.max_total_children is not None and len(self._children) >= self.max_total_children:
+                raise PolicyBudgetExceeded("max_total_children", self.max_total_children)
+            if is_new and self.max_work_units is not None and self._work_units + work_units > self.max_work_units:
+                raise PolicyBudgetExceeded("max_work_units", self.max_work_units)
+            if is_new:
+                self._children.add(child_id)
+                self._work_units += work_units
+            if reservation is not None and becomes_active:
+                del self._review_reservations[reservation]
+            if new_reservation:
+                assert opposite is not None
+                self._review_reservations[child_id] = opposite
+            self._active[child_id] += 1
+
+    def release(self, child_id: object) -> None:
+        """Release one active use while retaining its resumable slot."""
+        with self._lock:
+            self._active[child_id] -= 1
+            if self._active[child_id] <= 0:
+                del self._active[child_id]
 
 
 @dataclass(frozen=True)
 class PolicyContext:
     """Authority carried by one invocation into all nested work."""
 
-    effective_policy: EffectivePolicy
-    delegable_grants: EffectivePolicy
+    effective_policy: EffectivePolicy | None
+    delegable_grants: EffectivePolicy | None
     invocation_id: str
     parent_invocation_id: str | None = None
+    tree_budget: TreeBudget | None = None
+    depth: int = 0
 
 
 _current: ContextVar[PolicyContext | None] = ContextVar("lazybridge_policy_context", default=None)
@@ -31,6 +135,18 @@ def current_policy_context() -> PolicyContext | None:
     return _current.get()
 
 
+def review_engine(engine: object) -> str | None:
+    """Identify supported coding engines from the actual engine instance."""
+    from lazybridge.engines.claude_code.engine import ClaudeCodeEngine
+    from lazybridge.engines.codex.engine import CodexEngine
+
+    if isinstance(engine, ClaudeCodeEngine):
+        return "claude"
+    if isinstance(engine, CodexEngine):
+        return "codex"
+    return None
+
+
 def resolve_invocation_policy(
     configured: EffectivePolicy | TaskGrant | None,
 ) -> tuple[EffectivePolicy | None, PolicyContext | None]:
@@ -40,12 +156,12 @@ def resolve_invocation_policy(
     if configured is None:
         return (parent.effective_policy, parent) if parent is not None else (None, None)
     if isinstance(configured, TaskGrant):
-        if parent is None:
+        if parent is None or parent.delegable_grants is None:
             raise PolicyError("a TaskGrant requires a parent policy context")
         effective = child_within_parent(parent.delegable_grants, configured)
     elif isinstance(configured, EffectivePolicy):
         effective = configured
-        if parent is not None:
+        if parent is not None and parent.delegable_grants is not None:
             validate_child_policy(parent.delegable_grants, effective)
     else:
         raise TypeError("policy must be an EffectivePolicy, TaskGrant, or None")
@@ -53,24 +169,46 @@ def resolve_invocation_policy(
 
 
 @contextmanager
-def policy_scope(configured: EffectivePolicy | TaskGrant | None) -> Iterator[PolicyContext | None]:
+def policy_scope(
+    configured: EffectivePolicy | TaskGrant | None,
+    *,
+    tree_budget: TreeBudget | None = None,
+    child_id: object | None = None,
+    reserve_review: bool = False,
+    work_units: int = 1,
+    bind: bool = True,
+    role: str | None = None,
+    engine: str | None = None,
+) -> Iterator[PolicyContext | None]:
     """Bind policy authority for exactly one agent invocation."""
 
     effective, parent = resolve_invocation_policy(configured)
-    if effective is None:
+    budget = parent.tree_budget if parent is not None else tree_budget
+    if effective is None and budget is None:
         yield None
         return
+    depth = parent.depth + 1 if parent is not None else 0
+    admitted_id = child_id if parent is not None and budget is not None else None
+    if admitted_id is not None and budget is not None:
+        budget.admit(
+            admitted_id, depth=depth, reserve_review=reserve_review, work_units=work_units, role=role, engine=engine
+        )
     context = PolicyContext(
         effective_policy=effective,
         delegable_grants=effective,
         invocation_id=uuid.uuid4().hex,
         parent_invocation_id=parent.invocation_id if parent is not None else None,
+        tree_budget=budget,
+        depth=depth,
     )
-    token = _current.set(context)
+    token = _current.set(context) if bind else None
     try:
         yield context
     finally:
-        _current.reset(token)
+        if token is not None:
+            _current.reset(token)
+        if admitted_id is not None and budget is not None:
+            budget.release(admitted_id)
 
 
 @contextmanager

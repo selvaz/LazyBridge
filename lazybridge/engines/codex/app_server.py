@@ -705,7 +705,7 @@ class CodexAppServerClient:
                 thread_source=thread_source,
             )
             context = current_policy_context()
-            if context is None:
+            if context is None or context.effective_policy is None:
                 return await self._run_with_startup_retry(**kwargs)
             if self.command is not None or review_target is not None:
                 raise PolicyDenied("codex", "Custom commands and native review lack governed launch evidence.")
