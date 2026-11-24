@@ -606,7 +606,7 @@ class Agent:
                 audio=env.audio,
                 payload=env.payload,
             )
-            result = await self.fallback._run_as_tool(fallback_env)
+            result = await self.fallback.run(fallback_env)
 
         if self.guard and result.ok:
             result = await self._apply_output_guard(result)

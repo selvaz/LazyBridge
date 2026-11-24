@@ -165,3 +165,28 @@ async def test_mock_subclass_run_override_keeps_policy_in_plan(tmp_path):
     agent = Agent(engine=Plan(Step(CustomMock(record, name="worker"))), name="plan", policy=authority)
     assert (await agent.run("x")).ok
     assert observed == ["override", authority.digest]
+
+
+@pytest.mark.asyncio
+async def test_fallback_catches_conclude_and_inherits_policy(tmp_path):
+    from lazybridge.envelope import ErrorInfo
+    from lazybridge.signals import conclude
+
+    seen = []
+
+    class FailedEngine(CaptureEngine):
+        async def run(self, env, **kwargs):
+            return Envelope(error=ErrorInfo(type="failed", message="failure"))
+
+    class ConcludingEngine(CaptureEngine):
+        async def run(self, env, **kwargs):
+            ctx = current_policy_context()
+            seen.append(ctx.effective_policy.digest if ctx else None)
+            conclude("fallback answer")
+
+    authority = policy(tmp_path)
+    fallback = Agent(engine=ConcludingEngine(), name="fallback")
+    primary = Agent(engine=FailedEngine(), name="primary", fallback=fallback, policy=authority)
+    result = await primary._run_as_tool("work")
+    assert result.text() == "fallback answer"
+    assert seen == [authority.digest]
