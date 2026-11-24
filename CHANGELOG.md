@@ -8,6 +8,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-24
+
+### Added
+
+- Add a tree-wide delegation budget to the core policy: maximum depth, active and total children, work units, and a reserved review slot. (#261)
+- Make review independence configurable: an opposite-engine reviewer by default, with a fresh same-provider instance (no shared session, thread, or memory) as a fallback. The review record states the independence level. (#263)
+
+### Fixed
+
+- Allow child grants on a subfolder of the parent folder, and show when a ceiling clamps a child grant. (D188, D189, #262)
+- Expired typed approval tickets no longer look pending. (D190, #264)
+
 ## [1.9.0] - 2026-11-24
 
 ### Added
