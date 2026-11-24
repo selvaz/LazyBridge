@@ -1,0 +1,366 @@
+{
+  "schema": 1,
+  "checked_at": "2026-11-24T01:46:05.875370+00:00",
+  "launch_path": "CodexAppServerClient/stdio",
+  "policy_version": 1,
+  "policy_revision": "2026-11-23.1",
+  "runtime_version": "codex-cli 0.167.0-alpha.4.1",
+  "runtime_revision": "3f9cc14a30cf13d185b0e6b537ceb5aeeaeef31f8cc9596d1cd543affd00448a",
+  "platform": "Windows-10-10.0.26100-SP0",
+  "matrix": [
+    {
+      "profile": "read",
+      "network": "off",
+      "tool_classes": [
+        "read"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": true,
+          "detail": "Effective settings differing or unavailable: none. Disabled project layers: 1. Reported thread sandbox: readOnly."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Discovered inventory: {'fixture': []}."
+        },
+        "tool_discovery_and_call": {
+          "passed": true,
+          "detail": "Inventory: {'fixture': []}. Hidden call denied: True. Granted control: True."
+        },
+        "tool_host_egress": {
+          "passed": true,
+          "detail": "No configured or ambient tool host was callable with networking off."
+        },
+        "shell_roots": {
+          "passed": false,
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+        },
+        "shell_egress": {
+          "passed": true,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+        },
+        "native_reads": {
+          "passed": false,
+          "detail": "Model read canaries [task, sibling]: [False, False]. read_file advertised: False. Both calls returned: True."
+        },
+        "native_writes": {
+          "passed": true,
+          "detail": "Model apply_patch created [scratch, sibling]: [False, False]. apply_patch advertised: False. Both calls returned: True."
+        },
+        "shell_policy": {
+          "passed": true,
+          "detail": "Model shell inventory: []. Both direct calls returned: True. Shell canary was created: False. "
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "The requested revision differed from the stored thread binding."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "Native thread/resume returned the bound ID."
+        },
+        "resume_effective_policy": {
+          "passed": true,
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: none."
+        }
+      }
+    },
+    {
+      "profile": "read",
+      "network": "on",
+      "tool_classes": [
+        "read"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": true,
+          "detail": "Effective settings differing or unavailable: none. Disabled project layers: 1. Reported thread sandbox: readOnly."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Discovered inventory: {'fixture': ['lookup']}."
+        },
+        "tool_discovery_and_call": {
+          "passed": true,
+          "detail": "Inventory: {'fixture': ['lookup']}. Hidden call denied: True. Granted control: True."
+        },
+        "tool_host_egress": {
+          "passed": false,
+          "detail": "Tool-host endpoint reachability [declared, undeclared]: [True, True]."
+        },
+        "shell_roots": {
+          "passed": false,
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+        },
+        "shell_egress": {
+          "passed": true,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+        },
+        "native_reads": {
+          "passed": false,
+          "detail": "Model read canaries [task, sibling]: [False, False]. read_file advertised: False. Both calls returned: True."
+        },
+        "native_writes": {
+          "passed": true,
+          "detail": "Model apply_patch created [scratch, sibling]: [False, False]. apply_patch advertised: False. Both calls returned: True."
+        },
+        "shell_policy": {
+          "passed": true,
+          "detail": "Model shell inventory: []. Both direct calls returned: True. Shell canary was created: False. "
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "The requested revision differed from the stored thread binding."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "Native thread/resume returned the bound ID."
+        },
+        "resume_effective_policy": {
+          "passed": true,
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: none."
+        }
+      }
+    },
+    {
+      "profile": "edit",
+      "network": "off",
+      "tool_classes": [
+        "edit",
+        "read"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": false,
+          "detail": "Effective settings differing or unavailable: thread sandbox mode, thread writable roots. Disabled project layers: 1. Reported thread sandbox: readOnly."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Discovered inventory: {'fixture': []}."
+        },
+        "tool_discovery_and_call": {
+          "passed": true,
+          "detail": "Inventory: {'fixture': []}. Hidden call denied: True. Granted control: True."
+        },
+        "tool_host_egress": {
+          "passed": true,
+          "detail": "No configured or ambient tool host was callable with networking off."
+        },
+        "shell_roots": {
+          "passed": false,
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+        },
+        "shell_egress": {
+          "passed": true,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+        },
+        "native_reads": {
+          "passed": false,
+          "detail": "Model read canaries [task, sibling]: [False, False]. read_file advertised: False. Both calls returned: True."
+        },
+        "native_writes": {
+          "passed": false,
+          "detail": "Model apply_patch created [scratch, sibling]: [False, False]. apply_patch advertised: False. Both calls returned: True."
+        },
+        "shell_policy": {
+          "passed": true,
+          "detail": "Model shell inventory: []. Both direct calls returned: True. Shell canary was created: False. "
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "The requested revision differed from the stored thread binding."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "Native thread/resume returned the bound ID."
+        },
+        "resume_effective_policy": {
+          "passed": false,
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: isolated_config."
+        }
+      }
+    },
+    {
+      "profile": "edit",
+      "network": "on",
+      "tool_classes": [
+        "edit",
+        "read"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": false,
+          "detail": "Effective settings differing or unavailable: thread sandbox mode, thread network, thread writable roots. Disabled project layers: 1. Reported thread sandbox: readOnly."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Discovered inventory: {'fixture': ['lookup']}."
+        },
+        "tool_discovery_and_call": {
+          "passed": true,
+          "detail": "Inventory: {'fixture': ['lookup']}. Hidden call denied: True. Granted control: True."
+        },
+        "tool_host_egress": {
+          "passed": false,
+          "detail": "Tool-host endpoint reachability [declared, undeclared]: [True, True]."
+        },
+        "shell_roots": {
+          "passed": false,
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+        },
+        "shell_egress": {
+          "passed": true,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+        },
+        "native_reads": {
+          "passed": false,
+          "detail": "Model read canaries [task, sibling]: [False, False]. read_file advertised: False. Both calls returned: True."
+        },
+        "native_writes": {
+          "passed": false,
+          "detail": "Model apply_patch created [scratch, sibling]: [False, False]. apply_patch advertised: False. Both calls returned: True."
+        },
+        "shell_policy": {
+          "passed": true,
+          "detail": "Model shell inventory: []. Both direct calls returned: True. Shell canary was created: False. "
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "The requested revision differed from the stored thread binding."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "Native thread/resume returned the bound ID."
+        },
+        "resume_effective_policy": {
+          "passed": false,
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: isolated_config."
+        }
+      }
+    },
+    {
+      "profile": "edit-and-run",
+      "network": "off",
+      "tool_classes": [
+        "edit",
+        "read",
+        "shell"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": false,
+          "detail": "Effective settings differing or unavailable: thread sandbox mode, thread writable roots. Disabled project layers: 1. Reported thread sandbox: readOnly."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Discovered inventory: {'fixture': []}."
+        },
+        "tool_discovery_and_call": {
+          "passed": true,
+          "detail": "Inventory: {'fixture': []}. Hidden call denied: True. Granted control: True."
+        },
+        "tool_host_egress": {
+          "passed": true,
+          "detail": "No configured or ambient tool host was callable with networking off."
+        },
+        "shell_roots": {
+          "passed": false,
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+        },
+        "shell_egress": {
+          "passed": true,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+        },
+        "native_reads": {
+          "passed": false,
+          "detail": "Model read canaries [task, sibling]: [False, False]. read_file advertised: False. Both calls returned: True."
+        },
+        "native_writes": {
+          "passed": false,
+          "detail": "Model apply_patch created [scratch, sibling]: [False, False]. apply_patch advertised: False. Both calls returned: True."
+        },
+        "shell_policy": {
+          "passed": false,
+          "detail": "Model shell inventory: ['exec_command', 'write_stdin']. Both direct calls returned: True. Shell canary was created: False. A scoped command allowlist is unavailable."
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "The requested revision differed from the stored thread binding."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "Native thread/resume returned the bound ID."
+        },
+        "resume_effective_policy": {
+          "passed": false,
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: isolated_config."
+        }
+      }
+    },
+    {
+      "profile": "edit-and-run",
+      "network": "on",
+      "tool_classes": [
+        "edit",
+        "read",
+        "shell"
+      ],
+      "status": "red",
+      "probes": {
+        "isolated_config": {
+          "passed": false,
+          "detail": "Effective settings differing or unavailable: thread sandbox mode, thread network, thread writable roots. Disabled project layers: 1. Reported thread sandbox: readOnly."
+        },
+        "ambient_mcp_absent": {
+          "passed": true,
+          "detail": "Discovered inventory: {'fixture': ['lookup']}."
+        },
+        "tool_discovery_and_call": {
+          "passed": true,
+          "detail": "Inventory: {'fixture': ['lookup']}. Hidden call denied: True. Granted control: True."
+        },
+        "tool_host_egress": {
+          "passed": false,
+          "detail": "Tool-host endpoint reachability [declared, undeclared]: [True, True]."
+        },
+        "shell_roots": {
+          "passed": false,
+          "detail": "Reads [task, sibling]: [True, True]. Writes [scratch, sibling]: [False, False]. Control output: task-canary"
+        },
+        "shell_egress": {
+          "passed": false,
+          "detail": "Shell endpoint reachability [declared, undeclared]: [False, False]. Command control: True. Undeclared output: <urlopen error [WinError 10106] The requested service provider could not be loaded or initialized>"
+        },
+        "native_reads": {
+          "passed": false,
+          "detail": "Model read canaries [task, sibling]: [False, False]. read_file advertised: False. Both calls returned: True."
+        },
+        "native_writes": {
+          "passed": false,
+          "detail": "Model apply_patch created [scratch, sibling]: [False, False]. apply_patch advertised: False. Both calls returned: True."
+        },
+        "shell_policy": {
+          "passed": false,
+          "detail": "Model shell inventory: ['exec_command', 'write_stdin']. Both direct calls returned: True. Shell canary was created: False. A scoped command allowlist is unavailable."
+        },
+        "changed_revision_denied": {
+          "passed": true,
+          "detail": "The requested revision differed from the stored thread binding."
+        },
+        "thread_reuse": {
+          "passed": true,
+          "detail": "Native thread/resume returned the bound ID."
+        },
+        "resume_effective_policy": {
+          "passed": false,
+          "detail": "Repeated configuration, ambient inventory, direct calls and shell egress on resume. Failed or missing: isolated_config, shell_egress."
+        }
+      }
+    }
+  ]
+}
