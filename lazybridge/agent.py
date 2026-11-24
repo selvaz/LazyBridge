@@ -817,10 +817,28 @@ class Agent:
         Multimodal: pass ``images=`` / ``audio=`` to attach blocks to
         the streamed turn — same coercion semantics as :meth:`run`.
         """
-        from lazybridge.policy.context import policy_scope
+        from lazybridge.policy.context import bind_policy_context, policy_scope
 
+        with policy_scope(getattr(self, "policy", None)) as invocation:
+            pass
+        gen = self._stream_scoped(task, images=images, audio=audio)
+        try:
+            while True:
+                try:
+                    with bind_policy_context(invocation):
+                        chunk = await gen.__anext__()
+                except StopAsyncIteration:
+                    return
+                yield chunk
+        finally:
+            with bind_policy_context(invocation):
+                await gen.aclose()
+
+    async def _stream_scoped(
+        self, task: str | Envelope, *, images: list[Any] | None = None, audio: Any | None = None
+    ) -> AsyncGenerator[str, None]:
         guard = self.guard
-        with policy_scope(getattr(self, "policy", None)), _guarded_output() if guard else nullcontext():
+        with _guarded_output() if guard else nullcontext():
             env = self._inject_sources(self._to_envelope(task, images=images, audio=audio))
             if guard:
                 action = await guard.acheck_input(env.task or "")

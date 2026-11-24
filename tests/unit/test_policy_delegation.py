@@ -116,3 +116,32 @@ def test_resolved_child_checks_scratch_and_mcp_configuration(tmp_path):
     with policy_scope(parent), pytest.raises(PolicyWidening, match="configuration"):
         with policy_scope(child):
             pass
+
+
+@pytest.mark.asyncio
+async def test_stream_restores_parent_policy_between_chunks(tmp_path):
+    parent = policy(tmp_path)
+    child = policy(tmp_path, classes=())
+    seen = []
+
+    class StreamEngine(CaptureEngine):
+        async def stream(self, env, **kwargs):
+            seen.append(current_policy_context())
+            yield "one"
+            seen.append(current_policy_context())
+            yield "two"
+
+    agent = Agent(engine=StreamEngine(), name="child", policy=child)
+    read = Tool(lambda: "ok", name="read", policy_grant="read")
+    with policy_scope(parent) as parent_context:
+        stream = agent.stream("x")
+        assert await anext(stream) == "one"
+        assert current_policy_context() is parent_context
+        assert await read.run() == "ok"
+        assert await anext(stream) == "two"
+        assert current_policy_context() is parent_context
+        await stream.aclose()
+        assert current_policy_context() is parent_context
+    assert seen[0] is seen[1]
+    assert seen[0].effective_policy == child
+    assert current_policy_context() is None

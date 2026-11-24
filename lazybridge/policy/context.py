@@ -71,3 +71,13 @@ def policy_scope(configured: EffectivePolicy | TaskGrant | None) -> Iterator[Pol
         yield context
     finally:
         _current.reset(token)
+
+
+@contextmanager
+def bind_policy_context(context: PolicyContext | None) -> Iterator[None]:
+    """Temporarily restore an existing invocation context around a resume."""
+    token = _current.set(context)
+    try:
+        yield
+    finally:
+        _current.reset(token)
