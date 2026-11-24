@@ -28,7 +28,8 @@
         "mcp__approved__lookup"
       ],
       "deny": [
-        "Bash"
+        "Bash",
+        "mcp__approved__mutate"
       ]
     }
   },

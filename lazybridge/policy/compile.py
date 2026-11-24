@@ -39,6 +39,12 @@ def compile_claude(
     allow.extend(
         f"mcp__{name}__{tool}" for name, config in sorted(policy.mcp_servers.items()) for tool in config["tools"]
     )
+    deny.extend(
+        f"mcp__{name}__{tool}"
+        for name, config in sorted(policy.mcp_servers.items())
+        for tool in policy.mcp_inventory_tools[name]
+        if tool not in config["tools"]
+    )
     receipt = claude_admission_id(policy, release_report, runtime_revision)
     reasons = [] if receipt is not None else ["The launcher and workspace restrictions have not been verified."]
     if "shell" in policy.tool_classes:
