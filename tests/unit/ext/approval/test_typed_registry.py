@@ -15,6 +15,8 @@ from lazybridge.ext.approval import (
     TypedApprovalRequest,
 )
 
+OWNER = ApproverContext(actor="owner", role="owner")
+
 
 class Clock:
     def __init__(self) -> None:
@@ -54,7 +56,7 @@ def context(req: TypedApprovalRequest, **changes: object) -> ExecutorContext:
 @pytest.fixture
 def registry() -> tuple[ApprovalQueue, Clock]:
     clock = Clock()
-    return ApprovalQueue(Store(), clock=clock), clock
+    return ApprovalQueue(Store(), clock=clock, authenticate_approver=lambda: OWNER), clock
 
 
 def test_digest_redaction_decision_and_effect_outcome(registry: tuple[ApprovalQueue, Clock]) -> None:
@@ -63,7 +65,7 @@ def test_digest_redaction_decision_and_effect_outcome(registry: tuple[ApprovalQu
     ticket = queue.create_typed_ticket(req, prompt="Push topic")
     assert ticket.request is not None
     assert ticket.request.payload == {"message": "ship", "api_token": "[redacted]"}
-    assert queue.decide_typed_ticket(ticket.approval_id, approver=ApproverContext(actor="owner"), verdict="approved")
+    assert queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
     assert queue.consume_typed_ticket(ticket.approval_id, executor=context(req))
     assert queue.record_effect_outcome(ticket.approval_id, executor=context(req), succeeded=True, detail="pushed")
     stored = queue.get_ticket(ticket.approval_id)
@@ -104,7 +106,7 @@ def test_consumption_rejects_every_binding_mismatch(
     queue, _ = registry
     req = request()
     ticket = queue.create_typed_ticket(req)
-    assert queue.decide_typed_ticket(ticket.approval_id, approver=ApproverContext(actor="owner"), verdict="approved")
+    assert queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
     assert not queue.consume_typed_ticket(ticket.approval_id, executor=context(req, **change))
 
 
@@ -112,8 +114,27 @@ def test_authenticated_approver_cannot_claim_another_actor(registry: tuple[Appro
     queue, _ = registry
     ticket = queue.create_typed_ticket(request())
     assert not queue.decide_typed_ticket(
-        ticket.approval_id, approver=ApproverContext(actor="alice"), actor="bob", verdict="approved"
+        ticket.approval_id, approver=OWNER, actor="bob", verdict="approved"
     )
+
+
+@pytest.mark.parametrize(
+    "non_owner",
+    [ApproverContext(actor="coordinator", role="orchestrator"), ApproverContext(actor="owner")],
+)
+def test_typed_ticket_without_requester_path_is_owner_only(non_owner: ApproverContext) -> None:
+    store = Store()
+    queue = ApprovalQueue(store, authenticate_approver=lambda: non_owner)
+    ticket = queue.create_typed_ticket(request())
+    assert not ticket.requester_path
+    assert queue.list_pending_tickets(assignee=non_owner) == []
+    assert not queue.decide_typed_ticket(ticket.approval_id, approver=non_owner, verdict="approved")
+    assert not queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
+    assert queue.get_ticket(ticket.approval_id) == ticket
+
+    owner_queue = ApprovalQueue(store, authenticate_approver=lambda: OWNER)
+    assert owner_queue.list_pending_tickets(assignee=OWNER) == [ticket]
+    assert owner_queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
 
 
 def test_decision_and_consumption_are_single_winner_under_race(registry: tuple[ApprovalQueue, Clock]) -> None:
@@ -123,9 +144,7 @@ def test_decision_and_consumption_are_single_winner_under_race(registry: tuple[A
     with ThreadPoolExecutor(max_workers=8) as pool:
         decisions = list(
             pool.map(
-                lambda i: queue.decide_typed_ticket(
-                    ticket.approval_id, approver=ApproverContext(actor=f"owner-{i}"), verdict="approved"
-                ),
+                lambda _: queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved"),
                 range(8),
             )
         )
@@ -141,13 +160,11 @@ def test_expiry_blocks_decision_and_effect_consumption(registry: tuple[ApprovalQ
     queue, clock = registry
     ticket = queue.create_typed_ticket(request(), ttl=timedelta(seconds=1))
     clock.now += timedelta(seconds=1)
-    assert not queue.decide_typed_ticket(
-        ticket.approval_id, approver=ApproverContext(actor="owner"), verdict="approved"
-    )
+    assert not queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
 
     req = request(task_id="task-2")
     ticket = queue.create_typed_ticket(req, ttl=timedelta(seconds=1))
-    assert queue.decide_typed_ticket(ticket.approval_id, approver=ApproverContext(actor="owner"), verdict="approved")
+    assert queue.decide_typed_ticket(ticket.approval_id, approver=OWNER, verdict="approved")
     clock.now += timedelta(seconds=1)
     assert not queue.consume_typed_ticket(ticket.approval_id, executor=context(req))
 
@@ -191,7 +208,7 @@ def test_expiry_preserves_decisions_and_consumption(
     req = request()
     ticket = queue.create_typed_ticket(req, ttl=timedelta(seconds=1))
     approval_id = ticket.approval_id
-    assert queue.decide_typed_ticket(approval_id, approver=ApproverContext(actor="owner"), verdict=verdict)
+    assert queue.decide_typed_ticket(approval_id, approver=OWNER, verdict=verdict)
     if consume:
         assert queue.consume_typed_ticket(approval_id, executor=context(req))
         assert queue.record_effect_outcome(approval_id, executor=context(req), succeeded=True)
@@ -228,7 +245,7 @@ def test_legacy_decision_and_consumption_paths_refuse_typed_ticket(
     assert not queue.reject_ticket(rejected.approval_id, actor="anyone", channel="legacy", reason="no")
 
     decided = queue.create_typed_ticket(request(task_id="task-3"), prompt="Reusable")
-    assert queue.decide_typed_ticket(decided.approval_id, approver=ApproverContext(actor="owner"), verdict="approved")
+    assert queue.decide_typed_ticket(decided.approval_id, approver=OWNER, verdict="approved")
     assert not queue.claim_earlier_approval(task_id="task-3", prompt="Reusable")
     assert not queue.mark_approval_consumed(decided.approval_id)
 

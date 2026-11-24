@@ -38,32 +38,38 @@ from pathlib import Path
 
 from lazybridge import Store
 from lazybridge.ext.approval import ApprovalQueue, ApprovalTarget, ApproverContext, TypedApprovalRequest
-from lazybridge.policy import TaskGrant, policy_scope, resolve
+from lazybridge.policy import TaskGrant, current_policy_context, policy_scope, resolve
+
+
+def authenticate_approver() -> ApproverContext | None:
+    # The host binds the active invocation through its trusted dispatcher.
+    context = current_policy_context()
+    return ApproverContext.from_invocation(context) if context is not None else None
+
 
 folder = Path.cwd()
-queue = ApprovalQueue(Store())
+queue = ApprovalQueue(Store(), authenticate_approver=authenticate_approver)
 parent_policy = resolve(
     "edit-and-run",
     TaskGrant(folder, {"tool_classes": ["shell"]}, "off", "local",
               approval_authority=frozenset({"run_tests"})),
 )
-with (
-    policy_scope(parent_policy, approval_actor="coordinator") as parent,
-    policy_scope(TaskGrant(folder, {"tool_classes": ["shell"]}, "off", "local")) as runner,
-):
-    assert parent is not None and runner is not None
-    request = TypedApprovalRequest.create(
-        task_id="verify-release",
-        attempt=1,
-        action="run unit tests",
-        target=ApprovalTarget(path="tests"),
-        requested_by=runner.actor,
-        policy_revision=parent_policy.revision,
-        tier="routine",
-        action_class="run_tests",
-    )
-    ticket = queue.create_typed_ticket(request, requester=runner)
-    queue.decide_typed_ticket(
+with policy_scope(parent_policy, approval_actor="coordinator") as parent:
+    assert parent is not None
+    with policy_scope(TaskGrant(folder, {"tool_classes": ["shell"]}, "off", "local")) as runner:
+        assert runner is not None
+        request = TypedApprovalRequest.create(
+            task_id="verify-release",
+            attempt=1,
+            action="run unit tests",
+            target=ApprovalTarget(path="tests"),
+            requested_by=runner.actor,
+            policy_revision=parent_policy.revision,
+            tier="routine",
+            action_class="run_tests",
+        )
+        ticket = queue.create_typed_ticket(request, requester=runner)
+    assert queue.decide_typed_ticket(
         ticket.approval_id,
         approver=ApproverContext.from_invocation(parent),
         verdict="approved",
@@ -71,14 +77,29 @@ with (
 ```
 
 Use `route_ticket(ticket)` to inspect the assigned grant and
-`list_pending_tickets(assignee=context)` to list work for an authenticated
-approver. For ancestor decisions, the registry checks the actor, invocation ID,
-and effective policy digest. For owner decisions, it checks the configured
-`owner_actor` and authenticated `owner` role. To designate an independent
+`list_pending_tickets(assignee=context)` to filter work by assignee. Configure
+`ApprovalQueue(authenticate_approver=...)` with a zero-argument callback that
+returns the current caller's `ApproverContext` from trusted session or
+invocation state, or `None` for an unauthenticated caller. Keep queue setup
+and authentication state under host control. The callback must source the
+actor, role, invocation ID, and policy digest from that state independently of
+request parameters and ticket data.
+
+Decisions and manual forwarding require the supplied `approver` to match the
+authenticated context. The registry refuses these operations when authentication
+is unavailable. For ancestor decisions, it checks the authenticated actor,
+invocation ID, and effective policy digest against the current grant. For owner
+decisions, it checks the configured `owner_actor` and authenticated `owner`
+role. To designate an independent
 approver, configure `independent_approvers` with an external action class and
 the approver's authenticated actor. That actor must be outside the requester
 chain. The owner is the final fallback. If the owner made the request and
 there is nobody else eligible, the ticket stays unassigned.
+
+Typed tickets with a tier or action class require a requester invocation.
+Unclassified typed tickets without an invocation path, including historical
+tickets, can be decided only by the authenticated owner. The requester remains
+ineligible even if they are the owner.
 
 An approver can forward a pending ticket with
 `escalate(approval_id, summary, approver=context)`. An `EscalationSummary`

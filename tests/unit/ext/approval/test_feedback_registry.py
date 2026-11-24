@@ -18,7 +18,7 @@ from lazybridge.ext.approval import (
     RequestExecutorContext,
 )
 
-from .test_typed_registry import Clock
+from .test_typed_registry import OWNER, Clock
 from .test_typed_registry import request as approval_request
 
 
@@ -174,7 +174,7 @@ def test_invalid_answer_leaves_feedback_pending(answer: dict[str, str]) -> None:
 
 
 def test_feedback_cannot_be_used_as_an_approval_and_legacy_escalation_keeps_its_verbs() -> None:
-    queue = ApprovalQueue(Store(), clock=Clock())
+    queue = ApprovalQueue(Store(), clock=Clock(), authenticate_approver=lambda: OWNER)
     request = feedback_request()
     feedback = queue.create_feedback_ticket(request)
     legacy = queue.create_ticket(task_id=request.task_id, prompt=request.question, kind="escalation")
@@ -183,14 +183,14 @@ def test_feedback_cannot_be_used_as_an_approval_and_legacy_escalation_keeps_its_
 
     assert not queue.approve_ticket(feedback.approval_id, actor="owner", channel="cli")
     assert not queue.reject_ticket(feedback.approval_id, actor="owner", channel="cli", reason="no")
-    assert not queue.decide_typed_ticket(feedback.approval_id, approver=ORCHESTRATOR, verdict="approved")
+    assert not queue.decide_typed_ticket(feedback.approval_id, approver=OWNER, verdict="approved")
     assert not queue.answer_feedback_ticket(approval.approval_id, responder=ORCHESTRATOR, text="yes")
     assert not queue.answer_feedback_ticket(legacy.approval_id, responder=ORCHESTRATOR, text="yes")
     assert queue.answer_feedback_ticket(feedback.approval_id, responder=ORCHESTRATOR, text="yes")
     assert not queue.consume_typed_ticket(feedback.approval_id, executor=executor)
     assert not queue.mark_approval_consumed(feedback.approval_id)
     assert queue.approve_ticket(legacy.approval_id, actor="owner", channel="cli")
-    assert queue.decide_typed_ticket(approval.approval_id, approver=ORCHESTRATOR, verdict="approved")
+    assert queue.decide_typed_ticket(approval.approval_id, approver=OWNER, verdict="approved")
 
 
 def test_concurrent_feedback_answers_have_one_winner() -> None:

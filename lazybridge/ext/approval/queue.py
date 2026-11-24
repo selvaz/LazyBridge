@@ -635,6 +635,10 @@ class ApprovalQueue:
     per prefix a caller needs; the object itself holds no connection of its
     own beyond the ``Store`` it's given, so constructing one is cheap.
 
+    For typed decisions and manual escalation, ``authenticate_approver``
+    resolves the current caller from trusted transport state. It takes no
+    arguments and returns ``None`` when the caller is unauthenticated.
+
     ``prefix`` matching is a literal string prefix (same semantics as
     :meth:`Store.items`'s own ``prefix=``), NOT a namespace boundary: a
     queue whose prefix is itself a prefix of another queue's prefix (e.g.
@@ -662,6 +666,7 @@ class ApprovalQueue:
         denial_prefix: str = DEFAULT_DENIAL_PREFIX,
         notify_failure_prefix: str = DEFAULT_NOTIFY_FAILURE_PREFIX,
         clock: Callable[[], datetime] | None = None,
+        authenticate_approver: Callable[[], ApproverContext | None] | None = None,
         owner_actor: str = "owner",
         independent_approvers: Mapping[str, str] | None = None,
         action_tiers: Mapping[str, ApprovalTier] | None = None,
@@ -672,6 +677,9 @@ class ApprovalQueue:
         self._denial_prefix = denial_prefix
         self._notify_failure_prefix = notify_failure_prefix
         self._clock = clock or (lambda: datetime.now(UTC))
+        # Resolve the caller from trusted transport state, independently of
+        # any identity fields supplied with a decision or escalation.
+        self._authenticate_approver = authenticate_approver
         if not owner_actor.strip() or escalation_timeout <= timedelta(0):
             raise ValueError("routing requires an owner and a positive escalation timeout")
         self._owner = owner_actor
@@ -863,6 +871,12 @@ class ApprovalQueue:
 
     def _is_owner(self, approver: ApproverContext) -> bool:
         return approver.actor == self._owner and approver.role == "owner"
+
+    def _authenticated_approver(self, claimed: ApproverContext) -> ApproverContext | None:
+        if self._authenticate_approver is None or (principal := self._authenticate_approver()) is None:
+            return None
+        principal = ApproverContext.model_validate(principal)
+        return principal if principal == ApproverContext.model_validate(claimed) else None
 
     def _can_act(self, approver: ApproverContext, grant: ApprovalGrantUse | None) -> bool:
         if grant is None or grant.actor != approver.actor:
@@ -1075,9 +1089,9 @@ class ApprovalQueue:
         actor: str | None = None,
         reason: str | None = None,
     ) -> bool:
-        """Atomically decide a typed ticket using its current qualifying grant."""
-        approver = ApproverContext.model_validate(approver)
-        if actor is not None and actor != approver.actor:
+        """Decide a typed ticket as the caller resolved by ``authenticate_approver``."""
+        principal = self._authenticated_approver(approver)
+        if principal is None or (actor is not None and actor != principal.actor):
             return False
         key = self._key(approval_id)
         with self._anchored() as anchored:
@@ -1086,33 +1100,31 @@ class ApprovalQueue:
                 return False
             raw, ticket = current
             now = self._now()
-            if (
-                ticket.request is None
-                or ticket.request.requested_by == approver.actor
-                or ticket.status != "pending"
-                or ticket.decision is not None
-                or ticket.expires_at <= now
-            ):
+            if ticket.status != "pending" or ticket.decision is not None or ticket.expires_at <= now:
                 return False
             grant = route_ticket(ticket)
-            if ticket.request.tier is not None and not self._has_routed_authority(ticket, approver, grant):
+            if not self._has_ticket_authority(ticket, principal, grant):
                 return False
             decision = ApprovalDecision(
-                decider=approver.actor, decided_at=now, verdict=verdict, reason=reason, grant=grant
+                decider=principal.actor, decided_at=now, verdict=verdict, reason=reason, grant=grant
             )
             updated = ticket.model_copy(
-                update={"status": verdict, "actor": approver.actor, "reason": reason, "decision": decision}
+                update={"status": verdict, "actor": principal.actor, "reason": reason, "decision": decision}
             )
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
 
-    def _has_routed_authority(
+    def _has_ticket_authority(
         self, ticket: ApprovalTicket, approver: ApproverContext, grant: ApprovalGrantUse | None
     ) -> bool:
         request = ticket.request
+        if request is None or request.requested_by == approver.actor:
+            return False
+        if not ticket.requester_path:
+            # Unclassified typed requests (including historical records) are owner-only.
+            return ticket.route is None and request.tier is None and self._is_owner(approver)
         if (
-            request is None
+            request.tier is None
             or grant is None
-            or not ticket.requester_path
             or grant.action_class != request.action_class
             or approver.invocation_id == ticket.requester_path[-1]
             or not self._can_act(approver, grant)
@@ -1128,8 +1140,10 @@ class ApprovalQueue:
         return grant.source == "policy" and grant.invocation_id in eligible
 
     def escalate(self, approval_id: str, summary: EscalationSummary, *, approver: ApproverContext) -> bool:
-        """Forward a pending ticket from its current assignee to the next eligible one."""
-        approver = ApproverContext.model_validate(approver)
+        """Forward a pending ticket as its authenticated current assignee."""
+        principal = self._authenticated_approver(approver)
+        if principal is None:
+            return False
         summary = EscalationSummary.model_validate(summary)
         key = self._key(approval_id)
         with self._anchored() as anchored:
@@ -1144,11 +1158,11 @@ class ApprovalQueue:
                 or ticket.expires_at <= now
                 or route is None
                 or not route.remaining
-                or not self._has_routed_authority(ticket, approver, route.assignee)
+                or not self._has_ticket_authority(ticket, principal, route.assignee)
             ):
                 return False
             hop = ApprovalHop(
-                from_actor=approver.actor, to=route.remaining[0], at=now, reason="forwarded", summary=summary
+                from_actor=principal.actor, to=route.remaining[0], at=now, reason="forwarded", summary=summary
             )
             updated = ticket.model_copy(update={"route": route.advance(self._escalation_timeout, now=now, hop=hop)})
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
@@ -1369,7 +1383,7 @@ class ApprovalQueue:
                 if latest is None or latest.status != "pending":
                     continue
                 ticket = latest
-            if assignee is None or self._can_act(assignee, route_ticket(ticket)):
+            if assignee is None or self._has_ticket_authority(ticket, assignee, route_ticket(ticket)):
                 tickets.append(ticket)
         tickets.sort(key=lambda t: t.created_at)
         return tickets[:limit]
