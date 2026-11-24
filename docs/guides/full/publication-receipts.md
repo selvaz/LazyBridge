@@ -41,20 +41,27 @@ fingerprint is the hex SHA-256 digest of the raw public key. `sign` raises
 
 ## Verify a receipt
 
-Use a public key obtained from a trusted source. Supply `--expected-head` when
-you have the current PR head SHA.
+Use a public key obtained from a trusted source. For a published receipt, supply
+`--expected-head` when you have the current PR head SHA.
 
 ```bash
 python -m lazybridge.ext.receipt verify receipt.json --public-key issuer.pub.pem
 python -m lazybridge.ext.receipt verify receipt.json --public-key issuer.pub.pem --expected-head COMMIT_SHA
 ```
 
-The CLI prints `valid` and exits `0` on success. A signed refusal also verifies
-as `valid` when its evidence matches the candidate commit. Read
-`outcome.refusal_reason` for the reason publication was refused. On failure, the
-CLI prints the verification reason and exits `1`. In Python, use
+The CLI prints `valid` and exits `0` on success. Published receipts bind the
+review, approval, and checks to `publication.head_sha` and compare it with any
+supplied expected head. On failure, the CLI prints the verification reason and
+exits `1`. In Python, use
 `verify(receipt, public_key_pem, expected_head_sha=...)` and read `valid` and
 `reason` from the result.
+
+A refused receipt verifies with a valid signature, supported version, matching
+issuer, non-empty `outcome.refusal_reason`, and null `publication.pr_number`.
+Record the live head the executor observed in `publication.head_sha`. Keep the
+original `reviewer.reviewed_sha`, `approval.target.head_sha`, and check SHAs so
+the receipt shows any drift. The head comparisons apply only to published
+receipts.
 
 | Reason | Meaning |
 | --- | --- |

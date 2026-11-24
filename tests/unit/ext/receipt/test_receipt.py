@@ -159,11 +159,41 @@ def test_live_head_mismatch(fields: dict[str, Any], key: IssuerKey) -> None:
     assert _verify_signed(fields, key, OTHER_HEAD) == VerificationResult(False, "live_head_mismatch")
 
 
-def test_refused_receipt(fields: dict[str, Any], key: IssuerKey) -> None:
-    fields["publication"].update(pr_number=None, pr_url=None)
+def test_refused_after_review_head_drift(fields: dict[str, Any], key: IssuerKey) -> None:
+    fields["publication"].update(head_sha=OTHER_HEAD, pr_number=None, pr_url=None)
     fields["approval"].update(ticket_id=None, decided_by=None, decided_at=None, consumed_at=None, request_digest=None)
     fields["outcome"] = {"status": "refused", "refusal_reason": "head_changed_after_review"}
-    assert _verify_signed(fields, key) == VerificationResult(True)
+    assert _verify_signed(fields, key, HEAD) == VerificationResult(True)
+
+
+def test_refused_after_approval_head_drift(fields: dict[str, Any], key: IssuerKey) -> None:
+    fields["publication"].update(head_sha=OTHER_HEAD, pr_number=None, pr_url=None)
+    fields["reviewer"]["reviewed_sha"] = OTHER_HEAD
+    fields["approval"]["consumed_at"] = None
+    fields["outcome"] = {"status": "refused", "refusal_reason": "approval_target_mismatch"}
+    signed = sign(PublicationReceipt.model_validate(fields), key)
+    public_key = key.public_key_pem()
+    assert verify(signed, public_key, expected_head_sha=HEAD) == VerificationResult(True)
+    assert _verify_json(signed.model_dump_json(), public_key, HEAD) == VerificationResult(True)
+
+
+@pytest.mark.parametrize(("pr_number", "reason"), [(42, "head_changed_after_review"), (None, ""), (None, None)])
+def test_verify_rejects_malformed_refusals(
+    fields: dict[str, Any], key: IssuerKey, pr_number: int | None, reason: str | None
+) -> None:
+    fields["publication"].update(pr_number=None, pr_url=None)
+    fields["outcome"] = {"status": "refused", "refusal_reason": "head_changed_after_review"}
+    receipt = PublicationReceipt.model_validate(fields)
+    malformed = receipt.model_copy(
+        update={
+            "publication": receipt.publication.model_copy(update={"pr_number": pr_number}),
+            "outcome": receipt.outcome.model_copy(update={"refusal_reason": reason}),
+        }
+    )
+    signed = sign(malformed, key)
+    public_key = key.public_key_pem()
+    assert verify(signed, public_key) == VerificationResult(False, "invalid_receipt")
+    assert _verify_json(signed.model_dump_json(), public_key, None) == VerificationResult(False, "invalid_receipt")
 
 
 def _reverse_keys(value: Any) -> Any:

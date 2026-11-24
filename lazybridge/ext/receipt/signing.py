@@ -150,7 +150,7 @@ def verify(
     *,
     expected_head_sha: str | None = None,
 ) -> VerificationResult:
-    """Verify the signature and head bindings using a trusted issuer public key."""
+    """Verify a receipt using a trusted issuer key and, for publications, the expected head."""
     try:
         body = canonical_bytes(receipt)
     except ValueError:
@@ -168,6 +168,10 @@ def _verify_claims(
         return VerificationResult(False, "unknown_version")
     if not _issuer_matches(receipt.issuer, _fingerprint(public_key)):
         return VerificationResult(False, "issuer_mismatch")
+    if receipt.outcome.status == "refused":
+        if not receipt._has_valid_refusal():
+            return VerificationResult(False, "invalid_receipt")
+        return VerificationResult(True)
     head_sha = receipt.publication.head_sha
     if receipt.reviewer.reviewed_sha != head_sha:
         return VerificationResult(False, "review_head_mismatch")
@@ -175,7 +179,7 @@ def _verify_claims(
         return VerificationResult(False, "approval_head_mismatch")
     if any(check.head_sha != head_sha for check in receipt.checks):
         return VerificationResult(False, "check_head_mismatch")
-    if receipt.outcome.status == "published" and receipt.publication.pr_number is None:
+    if receipt.publication.pr_number is None:
         return VerificationResult(False, "published_without_pr")
     if expected_head_sha is not None and expected_head_sha != head_sha:
         return VerificationResult(False, "live_head_mismatch")
