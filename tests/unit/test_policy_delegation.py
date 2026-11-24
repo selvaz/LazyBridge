@@ -75,7 +75,8 @@ async def test_plan_verifier_fallback_and_async_child_keep_context(tmp_path):
     producer = MockAgent("answer", name="producer", policy=authority)
     verifier = MockAgent(record, name="verifier")
     from lazybridge._verify import verify_with_retry
-    await verify_with_retry(producer, Envelope(task="verify"), verifier)
+    with policy_scope(authority):
+        await verify_with_retry(producer, Envelope(task="verify"), verifier)
 
     async def child_task():
         await asyncio.sleep(0)
