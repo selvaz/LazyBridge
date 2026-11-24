@@ -654,7 +654,7 @@ class ClaudeCodeEngine:
                 system_prompt=self.system,
                 max_turns=self.max_turns,
                 resume=resume,
-                file_roots=(str(policy.folder),),
+                file_roots=(str(policy.folder), str(policy.scratch_folder)),
                 include_partial_messages=partial,
                 stream_idle_timeout=self.stream_idle_timeout,
                 initialize_timeout=self.initialize_timeout,
