@@ -227,13 +227,13 @@ class MockAgent:
     # ------------------------------------------------------------------
 
     async def run(self, task: str | Envelope) -> Envelope:
-        return await self._run_as_tool(task)
-
-    async def _run_as_tool(self, task: str | Envelope) -> Envelope:
         from lazybridge.policy.context import policy_scope
 
         with policy_scope(self.policy):
             return await self._run_body(task)
+
+    async def _run_as_tool(self, task: str | Envelope) -> Envelope:
+        return await self.run(task)
 
     async def _run_body(self, task: str | Envelope) -> Envelope:
         env_in = self._to_envelope(task)

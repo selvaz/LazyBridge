@@ -146,3 +146,22 @@ async def test_stream_restores_parent_policy_between_chunks(tmp_path):
     assert seen[0] is seen[1]
     assert seen[0].effective_policy == child
     assert current_policy_context() is None
+
+
+@pytest.mark.asyncio
+async def test_mock_subclass_run_override_keeps_policy_in_plan(tmp_path):
+    observed = []
+
+    class CustomMock(MockAgent):
+        async def run(self, task):
+            observed.append("override")
+            return await super().run(task)
+
+    def record(env):
+        observed.append(current_policy_context().effective_policy.digest)
+        return "done"
+
+    authority = policy(tmp_path)
+    agent = Agent(engine=Plan(Step(CustomMock(record, name="worker"))), name="plan", policy=authority)
+    assert (await agent.run("x")).ok
+    assert observed == ["override", authority.digest]
