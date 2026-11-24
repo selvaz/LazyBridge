@@ -26,6 +26,20 @@ class _FixtureClient(AgentSdkClient):
         return None
 
 
+def _resume_policy_probe(start: dict[str, Any], resumed: dict[str, Any]) -> dict[str, Any]:
+    """Report resumed enforcement failures without hiding pre-existing gaps."""
+    failed = {name for name, probe in resumed.items() if not probe["passed"]}
+    missing = start.keys() - resumed.keys()
+    prior = sorted(name for name in failed if name in start and not start[name]["passed"])
+    regressions = sorted((failed - set(prior)) | missing)
+    return {
+        "passed": not failed and not missing,
+        "detail": f"Pre-existing failures on resume: {', '.join(prior) or 'none'}. "
+        f"New or missing failures on resume: {', '.join(regressions) or 'none'}.",
+        "probes": resumed,
+    }
+
+
 async def row(
     root: Path,
     executable: str,
@@ -226,17 +240,12 @@ async def row(
     try:
         session_id, probes = await attempt(None, "start")
         resumed_id, resumed = await attempt(session_id, "resume")
+        probes["resume_effective_policy"] = _resume_policy_probe(probes, resumed)
         probes["thread_reuse"] = {
             "passed": bool(session_id and resumed_id == session_id),
             "detail": "The native resume returned the original session ID."
             if resumed_id == session_id and session_id
             else "The native resume did not return the original session ID.",
-        }
-        failed = sorted(name for name, probe in resumed.items() if not probe["passed"])
-        probes["resume_effective_policy"] = {
-            "passed": not failed,
-            "detail": f"Failed enforcement probes on resume: {', '.join(failed) or 'none'}.",
-            "probes": resumed,
         }
         changed = replace(policy, revision=f"{policy.revision}-changed")
         try:

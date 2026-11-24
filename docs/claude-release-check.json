@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "checked_at": "2026-11-24T02:47:02.471522+00:00",
+  "checked_at": "2026-11-24T03:34:39.139365+00:00",
   "launch_path": "AgentSdkClient/stdio",
   "policy_version": 1,
   "policy_revision": "2026-11-23.1",
   "runtime_version": "2.1.283 (Claude Code) / Agent SDK 0.2.129",
-  "runtime_revision": "303faca0fc36c268cb5f988a7003e96acc783052328e1ad1cd6959755049766a",
+  "runtime_revision": "55c7e43e7fcbb1dd552f9c235bf7d562d2d8c9b1a5a029f5f0ad3875536504b9",
   "platform": "Windows-10-10.0.26100-SP0",
   "matrix": [
     {
@@ -58,7 +58,7 @@
         },
         "resume_effective_policy": {
           "passed": true,
-          "detail": "Failed enforcement probes on resume: none.",
+          "detail": "Pre-existing failures on resume: none. New or missing failures on resume: none.",
           "probes": {
             "isolated_config": {
               "passed": true,
@@ -117,16 +117,16 @@
       "status": "red",
       "probes": {
         "isolated_config": {
-          "passed": false,
-          "detail": "Model-facing inventory: Glob, Grep, Read, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+          "passed": true,
+          "detail": "Model-facing inventory: Glob, Grep, Read, mcp__fixture__lookup. Unexpected tools: none."
         },
         "ambient_mcp_absent": {
           "passed": true,
           "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
         },
         "tool_discovery_and_call": {
-          "passed": false,
-          "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+          "passed": true,
+          "detail": "Granted lookup discovered: True. Hidden tool discovered: False. Hidden direct call rejected: True."
         },
         "native_reads": {
           "passed": true,
@@ -158,19 +158,19 @@
         },
         "resume_effective_policy": {
           "passed": false,
-          "detail": "Failed enforcement probes on resume: isolated_config, tool_discovery_and_call, tool_host_egress.",
+          "detail": "Pre-existing failures on resume: tool_host_egress. New or missing failures on resume: none.",
           "probes": {
             "isolated_config": {
-              "passed": false,
-              "detail": "Model-facing inventory: Glob, Grep, Read, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+              "passed": true,
+              "detail": "Model-facing inventory: Glob, Grep, Read, mcp__fixture__lookup. Unexpected tools: none."
             },
             "ambient_mcp_absent": {
               "passed": true,
               "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
             },
             "tool_discovery_and_call": {
-              "passed": false,
-              "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+              "passed": true,
+              "detail": "Granted lookup discovered: True. Hidden tool discovered: False. Hidden direct call rejected: True."
             },
             "native_reads": {
               "passed": true,
@@ -259,7 +259,7 @@
         },
         "resume_effective_policy": {
           "passed": true,
-          "detail": "Failed enforcement probes on resume: none.",
+          "detail": "Pre-existing failures on resume: none. New or missing failures on resume: none.",
           "probes": {
             "isolated_config": {
               "passed": true,
@@ -319,16 +319,16 @@
       "status": "red",
       "probes": {
         "isolated_config": {
-          "passed": false,
-          "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+          "passed": true,
+          "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__lookup. Unexpected tools: none."
         },
         "ambient_mcp_absent": {
           "passed": true,
           "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
         },
         "tool_discovery_and_call": {
-          "passed": false,
-          "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+          "passed": true,
+          "detail": "Granted lookup discovered: True. Hidden tool discovered: False. Hidden direct call rejected: True."
         },
         "native_reads": {
           "passed": true,
@@ -360,19 +360,19 @@
         },
         "resume_effective_policy": {
           "passed": false,
-          "detail": "Failed enforcement probes on resume: isolated_config, tool_discovery_and_call, tool_host_egress.",
+          "detail": "Pre-existing failures on resume: tool_host_egress. New or missing failures on resume: none.",
           "probes": {
             "isolated_config": {
-              "passed": false,
-              "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+              "passed": true,
+              "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__lookup. Unexpected tools: none."
             },
             "ambient_mcp_absent": {
               "passed": true,
               "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
             },
             "tool_discovery_and_call": {
-              "passed": false,
-              "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+              "passed": true,
+              "detail": "Granted lookup discovered: True. Hidden tool discovered: False. Hidden direct call rejected: True."
             },
             "native_reads": {
               "passed": true,
@@ -462,7 +462,7 @@
         },
         "resume_effective_policy": {
           "passed": false,
-          "detail": "Failed enforcement probes on resume: shell_egress, shell_policy, shell_roots.",
+          "detail": "Pre-existing failures on resume: shell_egress, shell_policy, shell_roots. New or missing failures on resume: none.",
           "probes": {
             "isolated_config": {
               "passed": true,
@@ -523,16 +523,16 @@
       "status": "red",
       "probes": {
         "isolated_config": {
-          "passed": false,
-          "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+          "passed": true,
+          "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__lookup. Unexpected tools: none."
         },
         "ambient_mcp_absent": {
           "passed": true,
           "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
         },
         "tool_discovery_and_call": {
-          "passed": false,
-          "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+          "passed": true,
+          "detail": "Granted lookup discovered: True. Hidden tool discovered: False. Hidden direct call rejected: True."
         },
         "native_reads": {
           "passed": true,
@@ -564,19 +564,19 @@
         },
         "resume_effective_policy": {
           "passed": false,
-          "detail": "Failed enforcement probes on resume: isolated_config, shell_egress, shell_policy, shell_roots, tool_discovery_and_call, tool_host_egress.",
+          "detail": "Pre-existing failures on resume: shell_egress, shell_policy, shell_roots, tool_host_egress. New or missing failures on resume: none.",
           "probes": {
             "isolated_config": {
-              "passed": false,
-              "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__hidden, mcp__fixture__lookup. Unexpected tools: mcp__fixture__hidden."
+              "passed": true,
+              "detail": "Model-facing inventory: Edit, Glob, Grep, NotebookEdit, Read, Write, mcp__fixture__lookup. Unexpected tools: none."
             },
             "ambient_mcp_absent": {
               "passed": true,
               "detail": "Both ambient servers must be absent from discovery and reject direct tool calls."
             },
             "tool_discovery_and_call": {
-              "passed": false,
-              "detail": "Granted lookup discovered: True. Hidden tool discovered: True. Hidden direct call rejected: True."
+              "passed": true,
+              "detail": "Granted lookup discovered: True. Hidden tool discovered: False. Hidden direct call rejected: True."
             },
             "native_reads": {
               "passed": true,
