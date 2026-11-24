@@ -484,17 +484,20 @@ class Agent:
 
         timeout = getattr(self, "timeout", None)
         guard = getattr(self, "guard", None)
-        with policy_scope(
-            getattr(self, "policy", None),
-            tree_budget=getattr(self, "tree_budget", None),
-            child_id=self,
-            reserve_review=getattr(self, "reserve_review", False),
-            role=getattr(self, "budget_role", None),
-            engine=review_engine(self.engine)
-            if getattr(self, "reserve_review", False) or getattr(self, "budget_role", None)
-            else None,
-            work_units=getattr(self, "work_units", 1),
-        ), _guarded_output() if guard else nullcontext():
+        with (
+            policy_scope(
+                getattr(self, "policy", None),
+                tree_budget=getattr(self, "tree_budget", None),
+                child_id=self,
+                reserve_review=getattr(self, "reserve_review", False),
+                role=getattr(self, "budget_role", None),
+                engine=review_engine(self.engine)
+                if getattr(self, "reserve_review", False) or getattr(self, "budget_role", None)
+                else None,
+                work_units=getattr(self, "work_units", 1),
+            ),
+            _guarded_output() if guard else nullcontext(),
+        ):
             try:
                 if timeout is None:
                     return await self._run_body(

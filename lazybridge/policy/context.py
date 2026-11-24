@@ -48,8 +48,14 @@ class TreeBudget:
                 raise ValueError(f"{name} must be a non-negative integer or None")
 
     def admit(
-        self, child_id: object, *, depth: int, reserve_review: bool = False,
-        work_units: int = 1, role: str | None = None, engine: str | None = None,
+        self,
+        child_id: object,
+        *,
+        depth: int,
+        reserve_review: bool = False,
+        work_units: int = 1,
+        role: str | None = None,
+        engine: str | None = None,
     ) -> None:
         """Atomically admit a child, or raise without changing counters."""
         if work_units < 0:
@@ -72,8 +78,11 @@ class TreeBudget:
             if self.max_depth is not None and depth > self.max_depth:
                 raise PolicyBudgetExceeded("max_depth", self.max_depth)
             reservation = next(
-                (writer for writer, expected in self._review_reservations.items()
-                 if role == "reviewer" and expected == engine and writer != child_id),
+                (
+                    writer
+                    for writer, expected in self._review_reservations.items()
+                    if role == "reviewer" and expected == engine and writer != child_id
+                ),
                 None,
             )
             new_reservation = reserve_review and child_id not in self._review_reservations
@@ -180,8 +189,10 @@ def policy_scope(
         return
     depth = parent.depth + 1 if parent is not None else 0
     admitted_id = child_id if parent is not None and budget is not None else None
-    if admitted_id is not None:
-        budget.admit(admitted_id, depth=depth, reserve_review=reserve_review, work_units=work_units, role=role, engine=engine)
+    if admitted_id is not None and budget is not None:
+        budget.admit(
+            admitted_id, depth=depth, reserve_review=reserve_review, work_units=work_units, role=role, engine=engine
+        )
     context = PolicyContext(
         effective_policy=effective,
         delegable_grants=effective,
@@ -196,7 +207,7 @@ def policy_scope(
     finally:
         if token is not None:
             _current.reset(token)
-        if admitted_id is not None:
+        if admitted_id is not None and budget is not None:
             budget.release(admitted_id)
 
 
