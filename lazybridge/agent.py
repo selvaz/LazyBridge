@@ -192,6 +192,7 @@ class Agent:
         cache: bool | Any = False,
         # Last on purpose: never shift an existing positional parameter.
         verify_context: bool = False,
+        *,
         policy: EffectivePolicy | TaskGrant | None = None,
     ) -> None:
         # ``name`` is "explicit" when the caller supplied a real string
