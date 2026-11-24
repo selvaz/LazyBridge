@@ -191,6 +191,9 @@ class MockAgent:
         default_model: str = "mock",
         default_provider: str = "mock",
         policy: Any | None = None,
+        tree_budget: Any | None = None,
+        reserve_review: bool = False,
+        work_units: int = 1,
     ) -> None:
         self._responses = responses
         self._cycle = cycle
@@ -209,6 +212,9 @@ class MockAgent:
         self.timeout: float | None = None
         self.fallback: Any | None = None
         self.policy = policy
+        self.tree_budget = tree_budget
+        self.reserve_review = reserve_review
+        self.work_units = work_units
         self._tools_raw: list[Any] = []
         self._tool_map: dict[str, Any] = {}
 
@@ -229,7 +235,13 @@ class MockAgent:
     async def run(self, task: str | Envelope) -> Envelope:
         from lazybridge.policy.context import policy_scope
 
-        with policy_scope(self.policy):
+        with policy_scope(
+            self.policy,
+            tree_budget=self.tree_budget,
+            child_id=self,
+            reserve_review=self.reserve_review,
+            work_units=self.work_units,
+        ):
             return await self._run_body(task)
 
     async def _run_as_tool(self, task: str | Envelope) -> Envelope:

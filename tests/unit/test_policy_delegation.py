@@ -4,7 +4,16 @@ import pytest
 
 from lazybridge import Agent, Plan, Step
 from lazybridge.envelope import Envelope
-from lazybridge.policy import PolicyDenied, PolicyWidening, TaskGrant, current_policy_context, policy_scope, resolve
+from lazybridge.policy import (
+    PolicyBudgetExceeded,
+    PolicyDenied,
+    PolicyWidening,
+    TaskGrant,
+    TreeBudget,
+    current_policy_context,
+    policy_scope,
+    resolve,
+)
 from lazybridge.testing import MockAgent
 from lazybridge.tools import Tool
 
@@ -56,6 +65,51 @@ async def test_nested_mock_sibling_and_grandchild_cannot_widen(tmp_path):
             await MockAgent("no", name="sibling", policy=wider).run("x")
         with policy_scope(parent), pytest.raises(PolicyWidening):
             await MockAgent("no", name="grandchild", policy=wider).run("x")
+
+
+@pytest.mark.asyncio
+async def test_mock_agent_tree_budget_reaches_plan_and_grandchildren(tmp_path):
+    authority = policy(tmp_path)
+    leaf = MockAgent("leaf", name="leaf")
+
+    async def invoke_leaf(_env):
+        return await leaf.run("nested")
+
+    child = MockAgent(invoke_leaf, name="child")
+    root = Agent(
+        engine=Plan(Step(child)),
+        name="root",
+        policy=authority,
+        tree_budget=TreeBudget(max_depth=1),
+    )
+    result = await root.run("work")
+    assert not result.ok
+    assert "max_depth" in result.error.message
+
+
+@pytest.mark.asyncio
+async def test_mock_agent_resume_reuses_total_child_slot(tmp_path):
+    authority = policy(tmp_path)
+    child = MockAgent("done", name="child")
+
+    async def run_twice(_env):
+        assert (await child.run("first")).ok
+        assert (await child.run("resume")).ok
+        return "complete"
+
+    root = MockAgent(
+        run_twice,
+        name="root",
+        policy=authority,
+        tree_budget=TreeBudget(max_total_children=1),
+    )
+    assert (await root.run("work")).text() == "complete"
+
+    with (
+        policy_scope(authority, tree_budget=TreeBudget(max_total_children=0)),
+        pytest.raises(PolicyBudgetExceeded, match="max_total_children"),
+    ):
+        await child.run("new")
 
 
 @pytest.mark.asyncio

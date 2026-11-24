@@ -3,11 +3,14 @@ from dataclasses import replace
 import pytest
 
 from lazybridge.policy import (
+    PolicyBudgetExceeded,
     PolicyError,
     PolicyWidening,
     TaskGrant,
+    TreeBudget,
     child_within_parent,
     opposite_engine_reviewer,
+    policy_scope,
     resolve,
 )
 
@@ -99,3 +102,59 @@ def test_digest_changes_with_inventory_tools(tmp_path):
     two = grant(tmp_path, mcp_inventory={"server": {"command": "server", "tools": ["read", "write", "delete"]}})
 
     assert resolve("edit-and-run", one).digest != resolve("edit-and-run", two).digest
+
+
+def test_tree_budget_depth_and_named_error(tmp_path):
+    authority = resolve("read", TaskGrant(tmp_path, {}, "off", "local"))
+    budget = TreeBudget(max_depth=1)
+    with (
+        policy_scope(authority, tree_budget=budget),
+        policy_scope(None, child_id="child"),
+        pytest.raises(PolicyBudgetExceeded) as raised,
+        policy_scope(None, child_id="grandchild"),
+    ):
+        pass
+    assert raised.value.bound == "max_depth"
+    assert "max_depth" in str(raised.value)
+
+
+def test_tree_budget_total_and_resume_slot_reuse(tmp_path):
+    authority = resolve("read", TaskGrant(tmp_path, {}, "off", "local"))
+    budget = TreeBudget(max_total_children=1, max_work_units=1)
+    with policy_scope(authority, tree_budget=budget):
+        with policy_scope(None, child_id="stable-session"):
+            pass
+        # Re-admitting the same identity is a resume and debits nothing new.
+        with policy_scope(None, child_id="stable-session"):
+            pass
+        with pytest.raises(PolicyBudgetExceeded, match="max_total_children"), policy_scope(
+            None, child_id="different-session"
+        ):
+            pass
+
+
+def test_tree_budget_reserves_active_review_slot(tmp_path):
+    authority = resolve("read", TaskGrant(tmp_path, {}, "off", "local"))
+    budget = TreeBudget(max_active_children=2)
+    with policy_scope(authority, tree_budget=budget), policy_scope(None, child_id="writer", reserve_review=True):
+        with policy_scope(None, child_id="reviewer"):
+            pass
+        with pytest.raises(PolicyBudgetExceeded) as raised, policy_scope(
+            None, child_id="second-writer", reserve_review=True
+        ):
+            pass
+    assert raised.value.bound == "max_active_children"
+
+
+def test_tree_budget_work_unit_error_names_bound(tmp_path):
+    authority = resolve("read", TaskGrant(tmp_path, {}, "off", "local"))
+    budget = TreeBudget(max_work_units=2)
+    with policy_scope(authority, tree_budget=budget), policy_scope(None, child_id="small", work_units=2):
+        pass
+    with (
+        policy_scope(authority, tree_budget=budget),
+        pytest.raises(PolicyBudgetExceeded) as raised,
+        policy_scope(None, child_id="extra", work_units=1),
+    ):
+        pass
+    assert raised.value.bound == "max_work_units"

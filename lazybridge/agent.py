@@ -14,7 +14,7 @@ from lazybridge.tools import Tool, ToolProvider, build_tool_map, check_timeout
 
 if TYPE_CHECKING:
     from lazybridge.core.providers.base import Tier
-    from lazybridge.policy import EffectivePolicy, TaskGrant
+    from lazybridge.policy import EffectivePolicy, TaskGrant, TreeBudget
 
 
 _calling_session: ContextVar[Any | None] = ContextVar("lazybridge_calling_session", default=None)
@@ -194,6 +194,9 @@ class Agent:
         verify_context: bool = False,
         *,
         policy: EffectivePolicy | TaskGrant | None = None,
+        tree_budget: TreeBudget | None = None,
+        reserve_review: bool = False,
+        work_units: int = 1,
     ) -> None:
         # ``name`` is "explicit" when the caller supplied a real string
         # value (not None / blank).  Used downstream to require a name
@@ -274,6 +277,9 @@ class Agent:
 
         self._tools_raw = list(tools or [])
         self.policy = policy
+        self.tree_budget = tree_budget
+        self.reserve_review = reserve_review
+        self.work_units = work_units
         # Validate before building the tool map so errors surface early with
         # the agent's current name rather than a wrapped Tool name.
         for _raw in self._tools_raw:
@@ -476,7 +482,13 @@ class Agent:
 
         timeout = getattr(self, "timeout", None)
         guard = getattr(self, "guard", None)
-        with policy_scope(getattr(self, "policy", None)), _guarded_output() if guard else nullcontext():
+        with policy_scope(
+            getattr(self, "policy", None),
+            tree_budget=getattr(self, "tree_budget", None),
+            child_id=self,
+            reserve_review=getattr(self, "reserve_review", False),
+            work_units=getattr(self, "work_units", 1),
+        ), _guarded_output() if guard else nullcontext():
             try:
                 if timeout is None:
                     return await self._run_body(
@@ -820,7 +832,13 @@ class Agent:
         """
         from lazybridge.policy.context import bind_policy_context, policy_scope
 
-        with policy_scope(getattr(self, "policy", None)) as invocation:
+        with policy_scope(
+            getattr(self, "policy", None),
+            tree_budget=getattr(self, "tree_budget", None),
+            child_id=self,
+            reserve_review=getattr(self, "reserve_review", False),
+            work_units=getattr(self, "work_units", 1),
+        ) as invocation:
             pass
         gen = self._stream_scoped(task, images=images, audio=audio)
         try:
