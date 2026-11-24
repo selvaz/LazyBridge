@@ -193,6 +193,8 @@ class MockAgent:
         policy: Any | None = None,
         tree_budget: Any | None = None,
         reserve_review: bool = False,
+        budget_role: str | None = None,
+        budget_engine: str | None = None,
         work_units: int = 1,
     ) -> None:
         self._responses = responses
@@ -214,6 +216,8 @@ class MockAgent:
         self.policy = policy
         self.tree_budget = tree_budget
         self.reserve_review = reserve_review
+        self.budget_role = budget_role
+        self.budget_engine = budget_engine
         self.work_units = work_units
         self._tools_raw: list[Any] = []
         self._tool_map: dict[str, Any] = {}
@@ -240,6 +244,8 @@ class MockAgent:
             tree_budget=self.tree_budget,
             child_id=self,
             reserve_review=self.reserve_review,
+            role=self.budget_role,
+            engine=self.budget_engine,
             work_units=self.work_units,
         ):
             return await self._run_body(task)

@@ -196,6 +196,7 @@ class Agent:
         policy: EffectivePolicy | TaskGrant | None = None,
         tree_budget: TreeBudget | None = None,
         reserve_review: bool = False,
+        budget_role: str | None = None,
         work_units: int = 1,
     ) -> None:
         # ``name`` is "explicit" when the caller supplied a real string
@@ -279,6 +280,7 @@ class Agent:
         self.policy = policy
         self.tree_budget = tree_budget
         self.reserve_review = reserve_review
+        self.budget_role = budget_role
         self.work_units = work_units
         # Validate before building the tool map so errors surface early with
         # the agent's current name rather than a wrapped Tool name.
@@ -477,7 +479,7 @@ class Agent:
         raised inside must propagate past this level up to the originating
         top-level :meth:`run`.
         """
-        from lazybridge.policy.context import policy_scope
+        from lazybridge.policy.context import policy_scope, review_engine
         from lazybridge.signals import ConcludeSignal
 
         timeout = getattr(self, "timeout", None)
@@ -487,6 +489,10 @@ class Agent:
             tree_budget=getattr(self, "tree_budget", None),
             child_id=self,
             reserve_review=getattr(self, "reserve_review", False),
+            role=getattr(self, "budget_role", None),
+            engine=review_engine(self.engine)
+            if getattr(self, "reserve_review", False) or getattr(self, "budget_role", None)
+            else None,
             work_units=getattr(self, "work_units", 1),
         ), _guarded_output() if guard else nullcontext():
             try:
@@ -830,13 +836,17 @@ class Agent:
         Multimodal: pass ``images=`` / ``audio=`` to attach blocks to
         the streamed turn — same coercion semantics as :meth:`run`.
         """
-        from lazybridge.policy.context import bind_policy_context, policy_scope
+        from lazybridge.policy.context import bind_policy_context, policy_scope, review_engine
 
         with policy_scope(
             getattr(self, "policy", None),
             tree_budget=getattr(self, "tree_budget", None),
             child_id=self,
             reserve_review=getattr(self, "reserve_review", False),
+            role=getattr(self, "budget_role", None),
+            engine=review_engine(self.engine)
+            if getattr(self, "reserve_review", False) or getattr(self, "budget_role", None)
+            else None,
             work_units=getattr(self, "work_units", 1),
             bind=False,
         ) as invocation:

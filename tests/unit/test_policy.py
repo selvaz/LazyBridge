@@ -136,14 +136,38 @@ def test_tree_budget_total_and_resume_slot_reuse(tmp_path):
 def test_tree_budget_reserves_active_review_slot(tmp_path):
     authority = resolve("read", TaskGrant(tmp_path, {}, "off", "local"))
     budget = TreeBudget(max_active_children=2)
-    with policy_scope(authority, tree_budget=budget), policy_scope(None, child_id="writer", reserve_review=True):
-        with policy_scope(None, child_id="reviewer"):
+    with policy_scope(authority, tree_budget=budget), policy_scope(
+        None, child_id="writer", reserve_review=True, engine="claude"
+    ):
+        with pytest.raises(PolicyBudgetExceeded) as raised, policy_scope(None, child_id="ordinary"):
             pass
-        with pytest.raises(PolicyBudgetExceeded) as raised, policy_scope(
-            None, child_id="second-writer", reserve_review=True
+        with pytest.raises(PolicyBudgetExceeded), policy_scope(
+            None, child_id="wrong-reviewer", role="reviewer", engine="claude"
         ):
             pass
+        with policy_scope(None, child_id="reviewer", role="reviewer", engine="codex"):
+            with pytest.raises(PolicyBudgetExceeded), policy_scope(None, child_id="extra"):
+                pass
     assert raised.value.bound == "max_active_children"
+
+
+def test_review_reservation_survives_writer_exit(tmp_path):
+    authority = resolve("read", TaskGrant(tmp_path, {}, "off", "local"))
+    budget = TreeBudget(max_active_children=1)
+    # A one-slot budget cannot admit a writer plus a review reservation.
+    with policy_scope(authority, tree_budget=budget), pytest.raises(PolicyBudgetExceeded):
+        with policy_scope(None, child_id="writer", reserve_review=True, engine="claude"):
+            pass
+
+    budget = TreeBudget(max_active_children=2)
+    with policy_scope(authority, tree_budget=budget):
+        with policy_scope(None, child_id="writer", reserve_review=True, engine="claude"):
+            pass
+        with policy_scope(None, child_id="ordinary"):
+            with pytest.raises(PolicyBudgetExceeded), policy_scope(None, child_id="other"):
+                pass
+            with policy_scope(None, child_id="reviewer", role="reviewer", engine="codex"):
+                pass
 
 
 def test_tree_budget_work_unit_error_names_bound(tmp_path):

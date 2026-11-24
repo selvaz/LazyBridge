@@ -38,6 +38,7 @@ class TreeBudget:
     _children: set[object] = field(default_factory=set, init=False, repr=False)
     _active: Counter[object] = field(default_factory=Counter, init=False, repr=False)
     _work_units: int = field(default=0, init=False, repr=False)
+    _review_reservations: dict[object, str] = field(default_factory=dict, init=False, repr=False)
     _lock: RLock = field(default_factory=RLock, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -46,19 +47,41 @@ class TreeBudget:
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
                 raise ValueError(f"{name} must be a non-negative integer or None")
 
-    def admit(self, child_id: object, *, depth: int, reserve_review: bool = False, work_units: int = 1) -> None:
+    def admit(
+        self, child_id: object, *, depth: int, reserve_review: bool = False,
+        work_units: int = 1, role: str | None = None, engine: str | None = None,
+    ) -> None:
         """Atomically admit a child, or raise without changing counters."""
         if work_units < 0:
             raise ValueError("work_units must be non-negative")
+        if role not in (None, "reviewer"):
+            raise ValueError("role must be reviewer or None")
+        if reserve_review and role is not None:
+            raise ValueError("a reviewer cannot reserve a review")
+        opposite = None
+        if reserve_review or role == "reviewer":
+            from . import opposite_engine_reviewer
+
+            if engine not in ("claude", "codex"):
+                raise PolicyError("review reservations require a claude or codex engine")
+            opposite = opposite_engine_reviewer(engine)
         with self._lock:
             is_new = child_id not in self._children
             becomes_active = not self._active.get(child_id, 0)
             active_limit = self.max_active_children
             if self.max_depth is not None and depth > self.max_depth:
                 raise PolicyBudgetExceeded("max_depth", self.max_depth)
-            if becomes_active and active_limit is not None:
-                usable = max(0, active_limit - int(reserve_review))
-                if len(self._active) >= usable:
+            reservation = next(
+                (writer for writer, expected in self._review_reservations.items()
+                 if role == "reviewer" and expected == engine and writer != child_id),
+                None,
+            )
+            new_reservation = reserve_review and child_id not in self._review_reservations
+            if active_limit is not None and (becomes_active or new_reservation):
+                occupied = len(self._active) + len(self._review_reservations) + int(new_reservation)
+                if reservation is not None and becomes_active:
+                    occupied -= 1
+                if occupied + int(becomes_active) > active_limit:
                     raise PolicyBudgetExceeded("max_active_children", active_limit)
             if is_new and self.max_total_children is not None and len(self._children) >= self.max_total_children:
                 raise PolicyBudgetExceeded("max_total_children", self.max_total_children)
@@ -67,6 +90,11 @@ class TreeBudget:
             if is_new:
                 self._children.add(child_id)
                 self._work_units += work_units
+            if reservation is not None and becomes_active:
+                del self._review_reservations[reservation]
+            if new_reservation:
+                assert opposite is not None
+                self._review_reservations[child_id] = opposite
             self._active[child_id] += 1
 
     def release(self, child_id: object) -> None:
@@ -96,6 +124,18 @@ def current_policy_context() -> PolicyContext | None:
     """Return the active invocation policy, if policy enforcement is enabled."""
 
     return _current.get()
+
+
+def review_engine(engine: object) -> str | None:
+    """Identify supported coding engines from the actual engine instance."""
+    from lazybridge.engines.claude_code.engine import ClaudeCodeEngine
+    from lazybridge.engines.codex.engine import CodexEngine
+
+    if isinstance(engine, ClaudeCodeEngine):
+        return "claude"
+    if isinstance(engine, CodexEngine):
+        return "codex"
+    return None
 
 
 def resolve_invocation_policy(
@@ -128,6 +168,8 @@ def policy_scope(
     reserve_review: bool = False,
     work_units: int = 1,
     bind: bool = True,
+    role: str | None = None,
+    engine: str | None = None,
 ) -> Iterator[PolicyContext | None]:
     """Bind policy authority for exactly one agent invocation."""
 
@@ -139,7 +181,7 @@ def policy_scope(
     depth = parent.depth + 1 if parent is not None else 0
     admitted_id = child_id if parent is not None and budget is not None else None
     if admitted_id is not None:
-        budget.admit(admitted_id, depth=depth, reserve_review=reserve_review, work_units=work_units)
+        budget.admit(admitted_id, depth=depth, reserve_review=reserve_review, work_units=work_units, role=role, engine=engine)
     context = PolicyContext(
         effective_policy=effective,
         delegable_grants=effective,
