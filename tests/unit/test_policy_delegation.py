@@ -38,7 +38,7 @@ async def test_tool_discovery_and_direct_boundary(tmp_path):
         with pytest.raises(PolicyDenied):
             await edit.run()
 
-    gate = Tool(bypass, name="gate")
+    gate = Tool(bypass, name="gate", policy_grant="read")
     agent = Agent(engine=CaptureEngine(), name="root", tools=[gate], policy=policy(tmp_path))
     with policy_scope(agent.policy):
         await gate.run()
@@ -190,3 +190,17 @@ async def test_fallback_catches_conclude_and_inherits_policy(tmp_path):
     result = await primary._run_as_tool("work")
     assert result.text() == "fallback answer"
     assert seen == [authority.digest]
+
+
+@pytest.mark.asyncio
+async def test_untagged_tools_fail_closed_only_under_policy(tmp_path):
+    tool = Tool(lambda: "ok", name="untagged")
+    assert await tool.run() == "ok"
+    assert tool.granted_by_active_policy()
+    engine = CaptureEngine()
+    agent = Agent(engine=engine, name="root", tools=[tool], policy=policy(tmp_path))
+    assert (await agent.run("work")).ok
+    assert engine.seen == [[]]
+    with policy_scope(agent.policy):
+        with pytest.raises(PolicyDenied):
+            await tool.run()

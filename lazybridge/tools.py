@@ -357,14 +357,18 @@ class Tool:
         return await self._dispatch(kwargs, self.timeout)
 
     def require_policy_grant(self) -> None:
-        """Refuse direct calls that bypass policy-filtered discovery."""
-        if self.policy_grant is None:
-            return
+        """Enforce discovery and invocation grants.
+
+        An active policy hides and denies untagged tools; without a policy,
+        tools remain available regardless of their grant.
+        """
         from lazybridge.policy import PolicyDenied, current_policy_context
 
         context = current_policy_context()
         if context is None:
             return
+        if self.policy_grant is None:
+            raise PolicyDenied(self.name, "tool has no policy grant")
         policy = context.effective_policy
         granted = self.policy_grant in policy.tool_classes or self.policy_grant in policy.tools
         if not granted:
