@@ -31,6 +31,7 @@ from lazybridge.engines.coding import (
 from lazybridge.engines.sessions import AliasBinding, SessionRegistry
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.model_tiers import translate_model
+from lazybridge.policy import current_policy_context
 from lazybridge.session import EventType
 
 from .app_server import (
@@ -158,6 +159,9 @@ def _config_overrides(policy: CodexPolicy) -> tuple[str, ...]:
     setting reaches only this agent's subprocess and never the shared
     ``~/.codex/config.toml``.
     """
+    if current_policy_context() is not None:
+        # The transport supplies the compiled file and matching thread config.
+        return ()
     overrides: list[str] = []
     if policy.web_search is not None:
         overrides.append(f'web_search="{policy.web_search}"')
@@ -386,6 +390,7 @@ class CodexEngine:
             except CodexTransportError as exc:
                 safe = (
                     attempt < self.retry_crashed_turns
+                    and current_policy_context() is None
                     and exc.turn_sent
                     and is_crash_returncode(exc.returncode)
                     and not progress.get("output_item_observed")
@@ -443,6 +448,8 @@ class CodexEngine:
         missed the handle write-back and the timeout classification.
         """
         output_schema = _native_output_schema(output_type)
+        if current_policy_context() is not None:
+            tools = [tool for tool in tools if tool.granted_by_active_policy()]
         kwargs: dict[str, Any] = {
             "prompt": self._prompt(env, memory, output_type, output_schema),
             "model": self.model,
@@ -516,12 +523,16 @@ class CodexEngine:
         so this is the last place that can tell the two apart, and it does it
         from what the client managed to report before being cut off.
         """
-        if not (self.persist_thread and progress.get("turn_sent")):
+        if not progress.get("turn_sent") or (not self.persist_thread and current_policy_context() is None):
             return exc  # nothing was sent, or nothing durable: a clean retry
         thread = progress.get("thread_id") or self.thread_id or ""
+        recovery = (
+            "Resume and inspect it before retrying."
+            if self.persist_thread
+            else "Inspect the workspace before retrying."
+        )
         return CodexTurnUncertain(
-            f"Turn timed out on durable thread {thread or '(unknown)'}; whether it was "
-            f"committed is unknown. Resume and inspect it before retrying.",
+            f"Turn timed out on thread {thread or '(unknown)'}. Its outcome is unknown. {recovery}",
             thread_id=thread,
             turn_id=None,
         )

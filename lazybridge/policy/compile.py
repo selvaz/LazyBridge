@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
-from .models import EffectivePolicy
+from .codex_admission import admission_id
+from .models import EffectivePolicy, PolicyError
 from .resolve import _thaw
+
+WINDOWS_SHELL_ENV = ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP")
 
 
 def _metadata(policy: EffectivePolicy) -> dict[str, str | int]:
@@ -47,49 +51,78 @@ def compile_claude(policy: EffectivePolicy) -> dict[str, Any]:
     }
 
 
-def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
+def compile_codex(
+    policy: EffectivePolicy, *, release_report: Path | str | None = None, runtime_revision: str | None = None
+) -> dict[str, Any]:
     """Generate a session CODEX_HOME config; admission requires launch verification."""
     writable = "edit" in policy.tool_classes
     overrides: dict[str, Any] = {
         "sandbox_mode": "workspace-write" if writable else "read-only",
         "approval_policy": "never",
         "web_search": "live" if policy.network == "on" and "web" in policy.tools else "disabled",
+        "projects": {str(policy.folder): {"trust_level": "untrusted"}},
+        "shell_environment_policy": {
+            "inherit": "all",
+            "filters": dict.fromkeys(WINDOWS_SHELL_ENV, "include"),
+        },
         "sandbox_workspace_write": {
             "network_access": policy.network == "on",
             "writable_roots": [str(policy.folder), str(policy.scratch_folder)] if writable else [],
+            "exclude_tmpdir_env_var": True,
+            "exclude_slash_tmp": True,
         },
-        "mcp_servers": {name: {"enabled": name in policy.mcp_servers} for name in policy.mcp_inventory},
+        "mcp_servers": {
+            name: (
+                {
+                    **{
+                        key: _thaw(value)
+                        for key, value in policy.mcp_servers[name].items()
+                        if key not in {"tools", "enabled", "enabled_tools", "disabled_tools"}
+                    },
+                    "enabled": True,
+                    "enabled_tools": list(policy.mcp_servers[name]["tools"]),
+                }
+                if name in policy.mcp_servers
+                # Native Codex still deserializes the transport for a disabled
+                # server. Use an inert loopback endpoint, never its real config.
+                else {"enabled": False, "url": "http://127.0.0.1:0"}
+            )
+            for name in policy.mcp_inventory
+        },
     }
-    reasons = ["The launcher has not verified the isolated CODEX_HOME and excluded project configuration."]
+    receipt = admission_id(policy, release_report, runtime_revision)
+    reasons = []
+    if receipt is None:
+        reasons.append("No green release check matches this local policy and runtime revision.")
     if "shell" not in policy.tool_classes:
         overrides["features"] = {"shell_tool": False}
-        reasons.append("Codex shell denial has not been verified for the target runtime.")
+        if receipt is None:
+            reasons.append("Codex shell denial has not been verified for the target runtime.")
     else:
         reasons.append("Scoped shell commands are not enforced by this configuration.")
     if policy.mcp_servers:
-        reasons.append("MCP server definitions and per-tool restrictions are not enforced by this configuration.")
-    if policy.network_routes:
-        reasons.append("Network route restrictions are not enforced by this configuration.")
+        reasons.append("MCP tool hosts require a separate confinement mechanism.")
+    if policy.network == "on":
+        reasons.append("Declared network routes are not enforced by this configuration.")
+    if "read" not in policy.tool_classes:
+        reasons.append("The configuration cannot disable native reads independently.")
 
-    def quote(value: object) -> str:
-        return json.dumps(value, ensure_ascii=True)
-
-    lines = [
-        f"sandbox_mode = {quote(overrides['sandbox_mode'])}",
-        'approval_policy = "never"',
-        f"web_search = {quote(overrides['web_search'])}",
-        "[sandbox_workspace_write]",
-        f"network_access = {str(policy.network == 'on').lower()}",
-        f"writable_roots = {quote(overrides['sandbox_workspace_write']['writable_roots'])}",
-    ]
-    if "features" in overrides:
-        lines.extend(["[features]", "shell_tool = false"])
-    for name, config in overrides["mcp_servers"].items():
-        lines.extend([f"[mcp_servers.{quote(name)}]", f"enabled = {str(config['enabled']).lower()}"])
     return {
         **_metadata(policy),
-        "eligible": False,
+        "eligible": not reasons,
+        "admission_id": receipt if not reasons else None,
         "ineligibility_reasons": reasons,
-        "codex_home_config_toml": "\n".join(lines) + "\n",
+        "codex_home_config_toml": "".join(f"{key} = {_toml_value(value)}\n" for key, value in overrides.items()),
         "config_overrides": overrides,
     }
+
+
+def _toml_value(value: Any) -> str:
+    """Encode the JSON-shaped values used by Codex config, including quoted keys."""
+    if isinstance(value, dict):
+        return "{ " + ", ".join(f"{_toml_value(key)} = {_toml_value(item)}" for key, item in value.items()) + " }"
+    if isinstance(value, list):
+        return "[" + ", ".join(map(_toml_value, value)) + "]"
+    if not isinstance(value, str | bool | int | float):
+        raise PolicyError(f"Codex TOML cannot represent a {type(value).__name__} value.")
+    return json.dumps(value, ensure_ascii=False, allow_nan=False).replace("\x7f", r"\u007f")

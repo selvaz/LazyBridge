@@ -3,31 +3,55 @@
   "policy_revision": "2026-11-23.1",
   "policy_digest": "ca97cfadd99045388ab8733dcf3df7a871011764be6182ff22b1b91b2f577198",
   "eligible": false,
+  "admission_id": null,
   "ineligibility_reasons": [
-    "The launcher has not verified the isolated CODEX_HOME and excluded project configuration.",
+    "No green release check matches this local policy and runtime revision.",
     "Scoped shell commands are not enforced by this configuration.",
-    "MCP server definitions and per-tool restrictions are not enforced by this configuration.",
-    "Network route restrictions are not enforced by this configuration."
+    "MCP tool hosts require a separate confinement mechanism.",
+    "Declared network routes are not enforced by this configuration."
   ],
-  "codex_home_config_toml": "sandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\nweb_search = \"live\"\n[sandbox_workspace_write]\nnetwork_access = true\nwritable_roots = [\"/workspace/example-task\", \"/workspace/example-task/.scratch\"]\n[mcp_servers.\"approved\"]\nenabled = true\n[mcp_servers.\"rogue\"]\nenabled = false\n",
+  "codex_home_config_toml": "sandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\nweb_search = \"live\"\nprojects = { \"/workspace/example-task\" = { \"trust_level\" = \"untrusted\" } }\nshell_environment_policy = { \"inherit\" = \"all\", \"filters\" = { \"SYSTEMROOT\" = \"include\", \"WINDIR\" = \"include\", \"COMSPEC\" = \"include\", \"PATHEXT\" = \"include\", \"TEMP\" = \"include\", \"TMP\" = \"include\" } }\nsandbox_workspace_write = { \"network_access\" = true, \"writable_roots\" = [\"/workspace/example-task\", \"/workspace/example-task/.scratch\"], \"exclude_tmpdir_env_var\" = true, \"exclude_slash_tmp\" = true }\nmcp_servers = { \"approved\" = { \"command\" = \"approved-server\", \"enabled\" = true, \"enabled_tools\" = [\"lookup\"] }, \"rogue\" = { \"enabled\" = false, \"url\" = \"http://127.0.0.1:0\" } }\n",
   "config_overrides": {
     "sandbox_mode": "workspace-write",
     "approval_policy": "never",
+    "web_search": "live",
+    "projects": {
+      "/workspace/example-task": {
+        "trust_level": "untrusted"
+      }
+    },
+    "shell_environment_policy": {
+      "inherit": "all",
+      "filters": {
+        "SYSTEMROOT": "include",
+        "WINDIR": "include",
+        "COMSPEC": "include",
+        "PATHEXT": "include",
+        "TEMP": "include",
+        "TMP": "include"
+      }
+    },
     "sandbox_workspace_write": {
       "network_access": true,
       "writable_roots": [
         "/workspace/example-task",
         "/workspace/example-task/.scratch"
-      ]
+      ],
+      "exclude_tmpdir_env_var": true,
+      "exclude_slash_tmp": true
     },
     "mcp_servers": {
       "approved": {
-        "enabled": true
+        "command": "approved-server",
+        "enabled": true,
+        "enabled_tools": [
+          "lookup"
+        ]
       },
       "rogue": {
-        "enabled": false
+        "enabled": false,
+        "url": "http://127.0.0.1:0"
       }
-    },
-    "web_search": "live"
+    }
   }
 }

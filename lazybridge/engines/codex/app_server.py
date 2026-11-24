@@ -23,10 +23,14 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from lazybridge._asyncbridge import abandoned_tasks
 from lazybridge.engines.coding import ApprovalGate, ApprovalRequest, ask_approval
 from lazybridge.envelope import UncertainOutcomeError
+from lazybridge.policy import PolicyDenied, current_policy_context
+
+from .policy_launch import PolicyLaunch
 
 ToolCallback = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
@@ -498,14 +502,31 @@ async def codex_concurrency_slot() -> AsyncIterator[None]:
 _client_slot = codex_concurrency_slot
 
 
+ProbeCallback = Callable[[Callable[[str, dict[str, Any]], Awaitable[Any]], dict[str, Any]], Awaitable[bool]]
+
+
 class CodexAppServerClient:
     """One ``codex app-server`` subprocess per run, torn down in ``finally``."""
 
-    def __init__(self, command: tuple[str, ...] | None = None) -> None:
+    def __init__(
+        self,
+        command: tuple[str, ...] | None = None,
+        *,
+        policy_release_report: Path | str | None = None,
+        policy_state_dir: Path | str | None = None,
+        policy_api_key: str | None = None,
+        policy_credential_id: UUID | None = None,
+    ) -> None:
         #: Resolved lazily so importing the package never touches the
         #: filesystem and a missing CLI surfaces at run() time, as a normal
         #: engine error, not at construction.
         self.command = command
+        self.policy_release_report = Path(policy_release_report) if policy_release_report is not None else None
+        self.policy_state_dir = Path(policy_state_dir) if policy_state_dir is not None else None
+        self._policy_api_key = policy_api_key
+        # Resolve this UUID alongside the credential in the executor. It is
+        # independent of the API key and can survive rotation for one identity.
+        self.policy_credential_id = policy_credential_id
 
     def _spawn_command(self, config_overrides: tuple[str, ...] = ()) -> tuple[str, ...]:
         """The argv for this run's App Server, per-agent overrides included.
@@ -661,7 +682,7 @@ class CodexAppServerClient:
         endpoint to change it after the fact.
         """
         async with _client_slot():
-            return await self._run_with_startup_retry(
+            kwargs = dict(
                 prompt=prompt,
                 model=model,
                 cwd=cwd,
@@ -682,6 +703,45 @@ class CodexAppServerClient:
                 progress=progress,
                 config_overrides=config_overrides,
                 thread_source=thread_source,
+            )
+            context = current_policy_context()
+            if context is None:
+                return await self._run_with_startup_retry(**kwargs)
+            if self.command is not None or review_target is not None:
+                raise PolicyDenied("codex", "Custom commands and native review lack governed launch evidence.")
+            executable = await asyncio.to_thread(codex_executable)
+            launch = await asyncio.to_thread(
+                PolicyLaunch.admit, context.effective_policy, executable, self.policy_release_report
+            )
+            if cwd is not None and Path(cwd).resolve() != launch.policy.folder:
+                raise PolicyDenied("codex", "Codex cwd differs from the assigned folder.")
+            return await self._run_policy_launch(launch, kwargs)
+
+    async def _run_policy_launch(
+        self, launch: PolicyLaunch, kwargs: dict[str, Any], *, probe: ProbeCallback | None = None
+    ) -> CodexRunResult:
+        """Shared production and offline-model release-check launch path."""
+        thread_id = kwargs.get("thread_id")
+        with launch.home(
+            thread_id,
+            bool(thread_id) or not kwargs.get("ephemeral", True),
+            self.policy_state_dir,
+            self._policy_api_key,
+            self.policy_credential_id,
+        ) as (home, env):
+            return await self._run_with_startup_retry(
+                **{
+                    **kwargs,
+                    "cwd": str(launch.policy.folder),
+                    "sandbox": launch.config["sandbox_mode"],
+                    "approval_policy": launch.config["approval_policy"],
+                    "approval_gate": None,
+                    "writable_roots": None,
+                    "config_overrides": (),
+                    "policy_launch": launch,
+                    "process_options": {"cwd": home, "env": env},
+                    "probe": probe,
+                }
             )
 
     async def _run_with_startup_retry(self, **kwargs: Any) -> CodexRunResult:
@@ -719,11 +779,17 @@ class CodexAppServerClient:
         progress: dict[str, Any] | None,
         config_overrides: tuple[str, ...],
         thread_source: str | None,
+        policy_launch: PolicyLaunch | None = None,
+        process_options: dict[str, Any] | None = None,
+        probe: ProbeCallback | None = None,
     ) -> CodexRunResult:
         if thread_id:
             ephemeral = False
         # Off the loop: the first lookup may probe app installs with `--version`.
-        command = await asyncio.to_thread(self._spawn_command, config_overrides)
+        if policy_launch is None:
+            command = await asyncio.to_thread(self._spawn_command, config_overrides)
+        else:
+            command = (policy_launch.executable, "app-server", "--strict-config")
         executable = command[0]
         version = (
             "custom command" if self.command is not None else await asyncio.to_thread(_display_version, executable)
@@ -735,6 +801,7 @@ class CodexAppServerClient:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **(process_options or {}),
             )
         except (FileNotFoundError, PermissionError, NotADirectoryError, IsADirectoryError):
             raise  # configuration problems, not transport blips
@@ -1136,6 +1203,11 @@ class CodexAppServerClient:
             )
             state.phase = "initialized"
             await send({"method": "initialized", "params": {}})
+            if policy_launch is not None and probe is None:
+                config = await request("config/read", {"cwd": cwd, "includeLayers": True})
+                mismatches = policy_launch.config_mismatches(config)
+                if mismatches:
+                    raise PolicyDenied("codex", f"Effective Codex configuration differs: {', '.join(mismatches)}.")
             # ``sandbox`` is the CLI's kebab-case ``SandboxMode`` enum
             # (read-only / workspace-write / danger-full-access); "readOnly"
             # is rejected outright with "unknown variant".
@@ -1150,7 +1222,9 @@ class CodexAppServerClient:
                 "sandbox": sandbox,
                 "dynamicTools": dynamic_tools,
             }
-            if writable_roots is not None:
+            if policy_launch is not None:
+                thread_params["config"] = policy_launch.config
+            elif writable_roots is not None:
                 # An explicit [] is sent too: it REMOVES roots inherited from the user's config.toml.
                 # There is no dedicated ``ThreadStartParams``/``ThreadResume
                 # Params`` field for this (verified against the generated App
@@ -1178,12 +1252,20 @@ class CodexAppServerClient:
                     thread_params["threadSource"] = thread_source
                 thread = await request("thread/start", thread_params)
             active_thread = thread["thread"]["id"]
+            if policy_launch is not None:
+                if probe is None and (mismatches := policy_launch.thread_mismatches(thread)):
+                    raise PolicyDenied("codex", f"Effective Codex thread differs: {', '.join(mismatches)}.")
+                if thread_id is not None and active_thread != thread_id:
+                    raise PolicyDenied("codex", "Codex resumed a different thread.")
+                policy_launch.bind_thread(active_thread)
             reported_model = thread.get("model")
             resolved_model = reported_model if isinstance(reported_model, str) and reported_model.strip() else None
             if progress is not None:
                 # Published before the turn: a durable thread that exists is
                 # worth reporting even if this call never returns a result.
                 progress["thread_id"] = active_thread
+            if probe is not None and not await probe(request, thread):
+                return CodexRunResult(text="", input_tokens=0, output_tokens=0, thread_id=active_thread)
             # ``input`` is the App Server's UserInput union: the text turn plus
             # any image attachments the engine converted. (Unused in native
             # review mode — ``review/start`` has no prompt slot.)
@@ -1221,11 +1303,15 @@ class CodexAppServerClient:
                 # where a cancellation cannot lose it.
                 raise
             except Exception as exc:
-                if ephemeral:
+                if ephemeral and policy_launch is None:
                     raise  # nothing survives the subprocess: a retry is clean
+                recovery = (
+                    "Inspect the workspace before retrying."
+                    if ephemeral
+                    else f"Resume thread {active_thread} and inspect it before retrying."
+                )
                 raise CodexTurnUncertain(
-                    f"Turn was accepted but its outcome is unknown: {exc}. "
-                    f"Resume thread {active_thread} and inspect it before retrying.",
+                    f"Turn was accepted but its outcome is unknown: {exc}. {recovery}",
                     thread_id=active_thread,
                     turn_id=turn_id,
                 ) from exc
@@ -1286,6 +1372,12 @@ class CodexAppServerClient:
                 await _reap(process)
                 stderr_task.cancel()
                 await asyncio.gather(stderr_task, return_exceptions=True)
+                if policy_launch is not None:
+                    # A native MCP child can keep pipe handles open on Windows.
+                    # Close the asyncio transport before removing launch state.
+                    transport = getattr(process, "_transport", None)
+                    if transport is not None:
+                        transport.close()
 
             await _finish_despite_cancel(asyncio.ensure_future(collect_child()))
 
