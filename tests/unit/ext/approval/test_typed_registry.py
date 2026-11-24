@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import pytest
 
@@ -149,6 +150,58 @@ def test_expiry_blocks_decision_and_effect_consumption(registry: tuple[ApprovalQ
     assert queue.decide_typed_ticket(ticket.approval_id, approver=ApproverContext(actor="owner"), verdict="approved")
     clock.now += timedelta(seconds=1)
     assert not queue.consume_typed_ticket(ticket.approval_id, executor=context(req))
+
+
+def test_pending_listing_uses_typed_clock_and_keeps_legacy_clock(registry: tuple[ApprovalQueue, Clock]) -> None:
+    queue, clock = registry
+    clock.now = datetime.now(UTC) + timedelta(days=1)
+    legacy = queue.create_ticket(task_id="old", prompt="old prompt", ttl=timedelta(hours=1))
+    expiring = queue.create_typed_ticket(request(), ttl=timedelta(seconds=1))
+    clock.now += timedelta(milliseconds=1)
+    waiting = queue.create_typed_ticket(request(), ttl=timedelta(seconds=2))
+
+    assert queue.list_pending_tickets() == [legacy, expiring, waiting]
+
+    clock.now = expiring.expires_at
+    assert queue.list_pending_tickets() == [legacy, waiting]
+    assert queue.get_ticket(legacy.approval_id) == legacy
+
+
+def test_get_ticket_reports_effective_expiry_and_can_persist_it(registry: tuple[ApprovalQueue, Clock]) -> None:
+    queue, clock = registry
+    ticket = queue.create_typed_ticket(request(), ttl=timedelta(seconds=1))
+    assert queue.get_ticket(ticket.approval_id) == ticket
+
+    clock.now = ticket.expires_at
+    expired = ticket.model_copy(update={"status": "expired"})
+    assert queue.get_ticket(ticket.approval_id) == expired
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: queue.expire_ticket(ticket.approval_id), range(8)))
+    assert results.count(True) == 1
+    clock.now = ticket.created_at
+    assert queue.get_ticket(ticket.approval_id) == expired
+
+
+@pytest.mark.parametrize(("verdict", "consume"), [("approved", False), ("rejected", False), ("approved", True)])
+def test_expiry_preserves_decisions_and_consumption(
+    registry: tuple[ApprovalQueue, Clock], verdict: Literal["approved", "rejected"], consume: bool
+) -> None:
+    queue, clock = registry
+    req = request()
+    ticket = queue.create_typed_ticket(req, ttl=timedelta(seconds=1))
+    approval_id = ticket.approval_id
+    assert queue.decide_typed_ticket(approval_id, approver=ApproverContext(actor="owner"), verdict=verdict)
+    if consume:
+        assert queue.consume_typed_ticket(approval_id, executor=context(req))
+        assert queue.record_effect_outcome(approval_id, executor=context(req), succeeded=True)
+    settled = queue.get_ticket(approval_id)
+    assert settled is not None and settled.status == verdict
+
+    clock.now = ticket.expires_at
+    assert queue.get_ticket(approval_id) == settled
+    assert not queue.expire_ticket(approval_id)
+    assert queue.get_ticket(approval_id) == settled
 
 
 def test_legacy_history_deserializes_but_cannot_govern(registry: tuple[ApprovalQueue, Clock]) -> None:

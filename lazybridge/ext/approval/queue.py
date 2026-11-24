@@ -775,9 +775,18 @@ class ApprovalQueue:
         return ticket
 
     def get_ticket(self, approval_id: str) -> ApprovalTicket | None:
+        """Read a ticket, reporting elapsed expiry for pending typed tickets.
+
+        Use :meth:`expire_ticket` to persist the transition.
+        """
         with self._anchored() as anchored:
             raw = anchored.read(self._key(approval_id))
-        return ApprovalTicket.model_validate(raw) if isinstance(raw, dict) else None
+        if not isinstance(raw, dict):
+            return None
+        ticket = ApprovalTicket.model_validate(raw)
+        if ticket.status == "pending" and not ticket.legacy and ticket.expires_at <= self._now():
+            return ticket.model_copy(update={"status": "expired"})
+        return ticket
 
     def list_pending_tickets(self, *, limit: int = 100) -> list[ApprovalTicket]:
         """Unexpired tickets still awaiting a decision, oldest first (FIFO queue).
@@ -796,7 +805,7 @@ class ApprovalQueue:
         """
         if limit <= 0:
             raise ValueError(f"limit must be positive, got {limit}")
-        now = datetime.now(UTC)
+        legacy_now = datetime.now(UTC)
         with self._anchored() as anchored:
             items = anchored.items(prefix=self._prefix)
         tickets = [
@@ -804,7 +813,8 @@ class ApprovalQueue:
             for _key, raw in items
             if isinstance(raw, dict) and raw.get("status") == "pending"
         ]
-        tickets = [t for t in tickets if t.expires_at > now]
+        typed_now = self._now() if any(not ticket.legacy for ticket in tickets) else legacy_now
+        tickets = [ticket for ticket in tickets if ticket.expires_at > (legacy_now if ticket.legacy else typed_now)]
         tickets.sort(key=lambda t: t.created_at)
         return tickets[:limit]
 
@@ -837,26 +847,12 @@ class ApprovalQueue:
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
 
     def expire_ticket(self, approval_id: str) -> bool:
-        """Record that nobody answered in time.
+        """Persist expiry for a ticket whose stored status is still pending.
 
-        Meant to be called by a waiter that is giving up (see
-        :class:`StoreApprovalChannel`'s ``wait_budget``), not by a
-        background sweep -- the read-time expiry filter in ``_actionable``/
-        ``list_pending_tickets`` still has to stand on its own, because a
-        waiter can die with its process and leave a record nobody will
-        ever come back to transition. This only closes the ones a caller
-        actually watched expire.
-
-        Without it a ticket sits at ``"pending"`` forever even once it is
-        truly dead, so any count of "waiting on a human" mixes live
-        questions with corpses, and nothing distinguishes "the ticket was
-        answered no" from "nobody ever saw it" -- two different situations
-        that deserve two different responses, not one shared status.
-
-        CAS: only transitions a ticket that is still ``"pending"`` at the
-        moment this runs -- a concurrent approve/reject that lands first
-        wins, and this call simply reports ``False``, the same "lost the
-        race" contract every other mutator in this class already has.
+        Callers can use this after observing expiry in :meth:`get_ticket`
+        or to explicitly close a pending ticket before its deadline. A
+        concurrent decision that wins the compare-and-swap is preserved,
+        and this method returns ``False``.
         """
         key = self._key(approval_id)
         with self._anchored() as anchored:
