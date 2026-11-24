@@ -213,16 +213,60 @@ def test_tree_budget_reserves_active_review_slot(tmp_path):
             pass
         with (
             pytest.raises(PolicyBudgetExceeded),
-            policy_scope(None, child_id="wrong-reviewer", role="reviewer", engine="claude"),
+            policy_scope(None, child_id="wrong-reviewer", role="reviewer", engine="claude", fresh=True),
         ):
             pass
         with (
-            policy_scope(None, child_id="reviewer", role="reviewer", engine="codex"),
+            policy_scope(None, child_id="reviewer", role="reviewer", engine="codex") as context,
             pytest.raises(PolicyBudgetExceeded),
             policy_scope(None, child_id="extra"),
         ):
             pass
+        assert context.review_independence == "opposite-engine"
     assert raised.value.bound == "max_active_children"
+
+
+def test_fallback_reserves_for_the_opposite_engine_when_available():
+    budget = TreeBudget(review_mode="opposite-or-fresh")
+    budget.admit("writer", depth=1, reserve_review=True, engine="claude")
+
+    with pytest.raises(PolicyError, match="single available engine"):
+        budget.admit("same", depth=1, role="reviewer", engine="claude", fresh=True)
+
+    assert budget.admit("opposite", depth=1, role="reviewer", engine="codex") == "opposite-engine"
+
+
+def test_fallback_reservation_refuses_a_non_fresh_or_reused_reviewer():
+    budget = TreeBudget(max_total_children=3, review_mode="opposite-or-fresh", available_engines={"codex"})
+    budget.admit("reused", depth=1)
+    budget.release("reused")
+    budget.admit("writer", depth=1, reserve_review=True, engine="codex")
+
+    with pytest.raises(PolicyError, match="fresh reviewer"):
+        budget.admit("not-fresh", depth=1, role="reviewer", engine="codex")
+    with pytest.raises(PolicyError, match="fresh reviewer"):
+        budget.admit("reused", depth=1, role="reviewer", engine="codex", fresh=True)
+    with pytest.raises(PolicyError, match="fresh reviewer"):
+        budget.admit("writer", depth=1, role="reviewer", engine="codex", fresh=True)
+
+    assert budget.admit("fresh", depth=1, role="reviewer", engine="codex", fresh=True) == "same-provider-fresh"
+
+
+def test_fallback_reservation_protects_active_slot_until_a_fresh_reviewer_claims_it():
+    budget = TreeBudget(max_active_children=2, review_mode="opposite-or-fresh", available_engines={"claude"})
+    with (
+        policy_scope(None, tree_budget=budget),
+        policy_scope(None, child_id="writer", reserve_review=True, engine="claude"),
+    ):
+        with pytest.raises(PolicyBudgetExceeded, match="max_active_children"):
+            budget.admit("other", depth=1, role="reviewer", engine="codex", fresh=True)
+        with pytest.raises(PolicyBudgetExceeded, match="max_active_children"):
+            budget.admit("not-fresh", depth=1, role="reviewer", engine="claude")
+        with policy_scope(None, child_id="fresh", role="reviewer", engine="claude", fresh=True) as context:
+            assert context.review_independence == "same-provider-fresh"
+            with pytest.raises(PolicyBudgetExceeded, match="max_active_children"):
+                budget.admit("extra", depth=1)
+        assert budget.admit("extra", depth=1) is None
 
 
 def test_review_reservation_survives_writer_exit(tmp_path):
