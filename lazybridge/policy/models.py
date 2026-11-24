@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +47,8 @@ class TaskGrant:
 
 @dataclass(frozen=True)
 class EffectivePolicy:
+    """Effective authority and diagnostics about grants removed by the profile ceiling."""
+
     profile: str
     version: int
     revision: str
@@ -61,3 +63,4 @@ class EffectivePolicy:
     mcp_inventory: tuple[str, ...]
     mcp_inventory_tools: Mapping[str, tuple[str, ...]]
     digest: str
+    removed_grants: tuple[tuple[str, str], ...] = field(default=(), compare=False)

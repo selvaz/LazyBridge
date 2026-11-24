@@ -111,13 +111,25 @@ def _digest(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def resolve(profile: str, grant: TaskGrant, document: ProfileDocument | None = None) -> EffectivePolicy:
-    """Intersect task grants with the profile ceiling and keep scratch inside the assigned folder."""
-    return _resolve(profile, grant, document)
+def resolve(
+    profile: str, grant: TaskGrant, document: ProfileDocument | None = None, *, strict: bool = False
+) -> EffectivePolicy:
+    """Intersect task grants with the profile ceiling and keep scratch inside the assigned folder.
+
+    Tool classes above the ceiling appear in ``removed_grants``. With
+    ``strict=True``, they raise ``PolicyError`` instead. The digest covers
+    effective authority and excludes removal diagnostics to preserve existing digests.
+    """
+    return _resolve(profile, grant, document, strict=strict)
 
 
 def _resolve(
-    profile: str, grant: TaskGrant, document: ProfileDocument | None, *, parent: EffectivePolicy | None = None
+    profile: str,
+    grant: TaskGrant,
+    document: ProfileDocument | None,
+    *,
+    parent: EffectivePolicy | None = None,
+    strict: bool = False,
 ) -> EffectivePolicy:
     document = document or load_profiles()
     if profile not in document.profiles:
@@ -147,6 +159,11 @@ def _resolve(
     if unknown_classes:
         raise PolicyError(f"unknown granted tool class(es): {', '.join(sorted(unknown_classes))}")
     classes = requested_classes & document.profiles[profile].allowed_tool_classes
+    removed_classes = sorted(requested_classes - classes)
+    removal_reason = f"above the {profile!r} profile ceiling"
+    if strict and removed_classes:
+        raise PolicyError(f"tool class grant(s) {', '.join(removed_classes)}: {removal_reason}")
+    removed_grants = tuple((name, removal_reason) for name in removed_classes)
     tools = frozenset(_strings(grant.grants.get("tools", ()), "tools"))
     unknown_tools = tools - TOOL_GRANTS
     if unknown_tools:
@@ -201,6 +218,7 @@ def _resolve(
         inventory,
         inventory_tools,
         _digest(canonical),
+        removed_grants=removed_grants,
     )
 
 
