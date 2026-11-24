@@ -1,6 +1,7 @@
 """Publication receipt encoding, signatures, and key persistence."""
 
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -11,6 +12,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 import pytest
@@ -293,6 +295,80 @@ def test_concurrent_key_creation_reuses_one_key(tmp_path: Path) -> None:
         key_ids = {key.key_id for key in executor.map(IssuerKey, [path] * 8)}
     assert key_ids == {IssuerKey(path).key_id}
     assert list(path.parent.iterdir()) == [path]
+
+
+def test_key_creation_without_hard_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "keys" / "issuer.pem"
+    open_key = os.open
+    link_attempts = []
+
+    def unsupported_link(source: Path, target: Path) -> None:
+        link_attempts.append(target)
+        raise OSError(errno.EOPNOTSUPP, "Hard links are unavailable")
+
+    def check_exclusive_create(file: Path, flags: int, mode: int = 0o777) -> int:
+        if file == path:
+            assert flags & os.O_CREAT
+            assert flags & os.O_EXCL
+            assert mode == 0o600
+        return open_key(file, flags, mode)
+
+    monkeypatch.setattr(os, "link", unsupported_link)
+    monkeypatch.setattr(os, "open", check_exclusive_create)
+    first = IssuerKey(path)
+    original = path.read_bytes()
+    assert IssuerKey(path).key_id == first.key_id
+    assert path.read_bytes() == original
+    assert link_attempts == [path]
+    assert list(path.parent.iterdir()) == [path]
+
+
+def test_exclusive_key_creation_preserves_concurrent_winner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    winner_path = tmp_path / "winner.pem"
+    winner = IssuerKey(winner_path)
+    winner_pem = winner_path.read_bytes()
+    path = tmp_path / "issuer.pem"
+
+    def unsupported_link(source: Path, target: Path) -> None:
+        target.write_bytes(winner_pem)
+        raise OSError(errno.EOPNOTSUPP, "Hard links are unavailable")
+
+    monkeypatch.setattr(os, "link", unsupported_link)
+    assert IssuerKey(path).key_id == winner.key_id
+    assert path.read_bytes() == winner_pem
+
+
+def test_concurrent_reader_waits_for_exclusive_key_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "issuer.pem"
+    open_key = os.open
+    read_bytes = Path.read_bytes
+    created = Event()
+    read_empty = Event()
+
+    def unsupported_link(source: Path, target: Path) -> None:
+        raise OSError(errno.EOPNOTSUPP, "Hard links are unavailable")
+
+    def pause_after_create(file: Path, flags: int, mode: int = 0o777) -> int:
+        fd = open_key(file, flags, mode)
+        if file == path:
+            created.set()
+            assert read_empty.wait(timeout=5)
+        return fd
+
+    def track_empty_read(file: Path) -> bytes:
+        data = read_bytes(file)
+        if file == path and not data:
+            read_empty.set()
+        return data
+
+    monkeypatch.setattr(os, "link", unsupported_link)
+    monkeypatch.setattr(os, "open", pause_after_create)
+    monkeypatch.setattr(Path, "read_bytes", track_empty_read)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(IssuerKey, path)
+        assert created.wait(timeout=5)
+        second = executor.submit(IssuerKey, path)
+        assert first.result(timeout=5).key_id == second.result(timeout=5).key_id
 
 
 def test_missing_cryptography_names_the_extra() -> None:

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import json
 import os
+import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -23,6 +26,10 @@ except ImportError as exc:
     ) from exc
 
 
+_LINK_UNAVAILABLE = {errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EPERM, errno.EXDEV}
+_LINK_UNAVAILABLE_WINERRORS = {1, 50}  # ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED
+
+
 class IssuerKey:
     """Load an Ed25519 private key, creating it at ``path`` on first use.
 
@@ -32,17 +39,34 @@ class IssuerKey:
     """
 
     def __init__(self, path: str | os.PathLike[str]) -> None:
-        path = Path(path)
-        try:
-            pem = path.read_bytes()
-        except FileNotFoundError:
-            self._create(path)
-            pem = path.read_bytes()
+        self._key = self._load(Path(path))
 
-        key = serialization.load_pem_private_key(pem, password=None)
+    @classmethod
+    def _load(cls, path: Path) -> Ed25519PrivateKey:
+        deadline = time.monotonic() + 1
+        while True:
+            try:
+                pem = path.read_bytes()
+            except FileNotFoundError:
+                cls._create(path)
+                pem = path.read_bytes()
+
+            try:
+                key = serialization.load_pem_private_key(pem, password=None)
+                break
+            except ValueError:
+                # Exclusive creation can expose an incomplete PEM to a concurrent reader.
+                header = b"-----BEGIN PRIVATE KEY-----"
+                incomplete = header.startswith(pem) or (
+                    pem.startswith(header) and b"-----END PRIVATE KEY-----" not in pem
+                )
+                if not incomplete or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
+
         if not isinstance(key, Ed25519PrivateKey):
             raise ValueError("The publication receipt issuer key must be an Ed25519 private key")
-        self._key = key
+        return key
 
     @staticmethod
     def _create(path: Path) -> None:
@@ -55,15 +79,20 @@ class IssuerKey:
         # Publish the complete file atomically without replacing a concurrent winner.
         with TemporaryDirectory(dir=path.parent) as directory:
             candidate = Path(directory) / "issuer.pem"
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
-            with os.fdopen(os.open(candidate, flags, 0o600), "wb") as key_file:
-                key_file.write(pem)
-                key_file.flush()
-                os.fsync(key_file.fileno())
+            _write_new_key(candidate, pem)
             try:
                 os.link(candidate, path)
             except FileExistsError:
-                pass
+                return
+            except OSError as exc:
+                # FAT and some network filesystems do not support hard links.
+                if (
+                    exc.errno not in _LINK_UNAVAILABLE
+                    and getattr(exc, "winerror", None) not in _LINK_UNAVAILABLE_WINERRORS
+                ):
+                    raise
+                with suppress(FileExistsError):
+                    _write_new_key(path, pem)
 
     @property
     def key_id(self) -> str:
@@ -80,6 +109,23 @@ class IssuerKey:
     def fingerprint(self) -> str:
         """Return the lowercase hex SHA-256 digest of the raw public key."""
         return _fingerprint(self._key.public_key())
+
+
+def _write_new_key(path: Path, pem: bytes) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
+    written = False
+    try:
+        with os.fdopen(fd, "wb", buffering=0) as key_file:
+            if key_file.write(pem) != len(pem):
+                raise OSError(errno.EIO, "Incomplete issuer key write")
+            written = True
+            os.fsync(key_file.fileno())
+    except OSError:
+        if not written:
+            with suppress(OSError):
+                path.unlink()
+        raise
 
 
 def _fingerprint(public_key: Ed25519PublicKey) -> str:
