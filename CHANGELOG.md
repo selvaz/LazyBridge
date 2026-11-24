@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Add version 1 publication receipts with Ed25519 signing, SHA-bound verification, and a verification CLI in `lazybridge.ext.receipt`. Install the `receipt` extra to use it.
+
 ## [1.9.1] - 2026-11-24
 
 ### Added

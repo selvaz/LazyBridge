@@ -210,6 +210,7 @@ nav:
           - Claude Code writes, Codex reviews: guides/full/claude-writes-codex-reviews.md
           - Coding-agent permissions: guides/full/coding-agent-config.md
           - Session aliases: guides/full/session-registry.md
+          - Publication receipts: guides/full/publication-receipts.md
       - Advanced:
           - Core vs Ext boundary: guides/core-vs-ext.md
           - Engine protocol: guides/advanced/engine-protocol.md
