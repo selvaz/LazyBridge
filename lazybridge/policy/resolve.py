@@ -143,7 +143,14 @@ def resolve(profile: str, grant: TaskGrant, document: ProfileDocument | None = N
     if grant.network == "off" and routes:
         raise PolicyError("network_routes require network='on'")
     servers = _normalise_servers(grant.grants)
-    inventory = tuple(sorted(grant.grants.get("mcp_inventory", grant.grants.get("mcp_servers", {}))))
+    raw_inventory = grant.grants.get("mcp_inventory", grant.grants.get("mcp_servers", {}))
+    inventory = tuple(sorted(raw_inventory))
+    inventory_tools = MappingProxyType(
+        {
+            name: tuple(sorted(_strings(config.get("tools", ()), f"MCP inventory {name!r}.tools")))
+            for name, config in raw_inventory.items()
+        }
+    )
     if servers and "mcp" not in tools:
         raise PolicyError("MCP servers require the explicit 'mcp' tool grant")
     # Native web and tool hosts are task-controlled egress surfaces.  They are
@@ -165,6 +172,7 @@ def resolve(profile: str, grant: TaskGrant, document: ProfileDocument | None = N
         "placement": grant.placement,
         "mcp_servers": _thaw(servers),
         "mcp_inventory": inventory,
+        "mcp_inventory_tools": _thaw(inventory_tools),
     }
     return EffectivePolicy(
         profile,
@@ -179,6 +187,7 @@ def resolve(profile: str, grant: TaskGrant, document: ProfileDocument | None = N
         grant.placement,
         servers,
         inventory,
+        inventory_tools,
         _digest(canonical),
     )
 

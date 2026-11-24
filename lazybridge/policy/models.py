@@ -59,4 +59,5 @@ class EffectivePolicy:
     placement: str
     mcp_servers: Mapping[str, Mapping[str, Any]]
     mcp_inventory: tuple[str, ...]
+    mcp_inventory_tools: Mapping[str, tuple[str, ...]]
     digest: str
