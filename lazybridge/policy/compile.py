@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
+from .codex_admission import admission_id
 from .models import EffectivePolicy
 from .resolve import _thaw
 
@@ -47,16 +49,22 @@ def compile_claude(policy: EffectivePolicy) -> dict[str, Any]:
     }
 
 
-def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
+def compile_codex(
+    policy: EffectivePolicy, *, release_report: Path | str | None = None, runtime_revision: str | None = None
+) -> dict[str, Any]:
     """Generate a session CODEX_HOME config; admission requires launch verification."""
     writable = "edit" in policy.tool_classes
     overrides: dict[str, Any] = {
         "sandbox_mode": "workspace-write" if writable else "read-only",
         "approval_policy": "never",
         "web_search": "live" if policy.network == "on" and "web" in policy.tools else "disabled",
+        "projects": {str(policy.folder): {"trust_level": "untrusted"}},
+        "shell_environment_policy": {"inherit": "none"},
         "sandbox_workspace_write": {
             "network_access": policy.network == "on",
             "writable_roots": [str(policy.folder), str(policy.scratch_folder)] if writable else [],
+            "exclude_tmpdir_env_var": True,
+            "exclude_slash_tmp": True,
         },
         "mcp_servers": {
             name: (
@@ -70,25 +78,34 @@ def compile_codex(policy: EffectivePolicy) -> dict[str, Any]:
                     "enabled_tools": list(policy.mcp_servers[name]["tools"]),
                 }
                 if name in policy.mcp_servers
-                else {"enabled": False}
+                # Native Codex still deserializes the transport for a disabled
+                # server. Use an inert loopback endpoint, never its real config.
+                else {"enabled": False, "url": "http://127.0.0.1:0"}
             )
             for name in policy.mcp_inventory
         },
     }
-    reasons = ["The launcher has not verified the isolated CODEX_HOME and excluded project configuration."]
+    receipt = admission_id(policy, release_report, runtime_revision)
+    reasons = []
+    if receipt is None:
+        reasons.append("No green release check matches this local policy and runtime revision.")
     if "shell" not in policy.tool_classes:
         overrides["features"] = {"shell_tool": False}
-        reasons.append("Codex shell denial has not been verified for the target runtime.")
+        if receipt is None:
+            reasons.append("Codex shell denial has not been verified for the target runtime.")
     else:
         reasons.append("Scoped shell commands are not enforced by this configuration.")
     if policy.mcp_servers:
-        reasons.append("MCP tool filtering and tool-host confinement require native verification.")
-    if policy.network_routes:
-        reasons.append("Network route restrictions are not enforced by this configuration.")
+        reasons.append("MCP tool hosts require a separate confinement mechanism.")
+    if policy.network == "on":
+        reasons.append("Declared network routes are not enforced by this configuration.")
+    if "read" not in policy.tool_classes:
+        reasons.append("The configuration cannot disable native reads independently.")
 
     return {
         **_metadata(policy),
-        "eligible": False,
+        "eligible": not reasons,
+        "admission_id": receipt if not reasons else None,
         "ineligibility_reasons": reasons,
         "codex_home_config_toml": "".join(f"{key} = {_toml_value(value)}\n" for key, value in overrides.items()),
         "config_overrides": overrides,

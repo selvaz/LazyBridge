@@ -57,7 +57,7 @@ def test_all_profile_switch_combinations(tmp_path: Path, profile: str, network: 
     assert codex["config_overrides"]["web_search"] == ("live" if network == "on" else "disabled")
     assert tomllib.loads(codex["codex_home_config_toml"]) == codex["config_overrides"]
     assert "rogue" not in json.dumps(compile_claude(policy))
-    assert codex["config_overrides"]["mcp_servers"]["rogue"] == {"enabled": False}
+    assert codex["config_overrides"]["mcp_servers"]["rogue"] == {"enabled": False, "url": "http://127.0.0.1:0"}
     assert codex["config_overrides"]["mcp_servers"]["approved"]["enabled"] is (network == "on")
 
 

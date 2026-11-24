@@ -31,6 +31,7 @@ from lazybridge.engines.coding import (
 from lazybridge.engines.sessions import AliasBinding, SessionRegistry
 from lazybridge.envelope import Envelope, EnvelopeMetadata
 from lazybridge.model_tiers import translate_model
+from lazybridge.policy import current_policy_context
 from lazybridge.session import EventType
 
 from .app_server import (
@@ -158,6 +159,9 @@ def _config_overrides(policy: CodexPolicy) -> tuple[str, ...]:
     setting reaches only this agent's subprocess and never the shared
     ``~/.codex/config.toml``.
     """
+    if current_policy_context() is not None:
+        # The transport supplies the compiled file and matching thread config.
+        return ()
     overrides: list[str] = []
     if policy.web_search is not None:
         overrides.append(f'web_search="{policy.web_search}"')
@@ -443,6 +447,8 @@ class CodexEngine:
         missed the handle write-back and the timeout classification.
         """
         output_schema = _native_output_schema(output_type)
+        if current_policy_context() is not None:
+            tools = [tool for tool in tools if tool.granted_by_active_policy()]
         kwargs: dict[str, Any] = {
             "prompt": self._prompt(env, memory, output_type, output_schema),
             "model": self.model,
