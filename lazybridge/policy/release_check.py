@@ -1,9 +1,10 @@
-"""Opt-in local Codex release check. Run with python -m lazybridge.policy.release_check."""
+"""Opt-in local runtime release checks. Run with python -m lazybridge.policy.release_check."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.metadata
 import json
 import os
 import platform
@@ -499,14 +500,89 @@ async def run_check(document: ProfileDocument, fixture_parent: Path | None = Non
     }
 
 
+async def run_claude_check(
+    document: ProfileDocument, fixture_parent: Path | None = None, executable: Path | None = None
+) -> dict[str, Any]:
+    from ._claude_release_check import row
+    from .claude_admission import LAUNCH_PATH as CLAUDE_PATH
+    from .claude_admission import REQUIRED_PROBES as CLAUDE_PROBES
+    from .claude_admission import runtime_revision as claude_runtime_revision
+
+    checked_at = datetime.now(UTC).isoformat()
+    version, revision = "unavailable", None
+    matrix: list[dict[str, Any]] = []
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions
+        from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+
+        binary = (executable or Path(SubprocessCLITransport("", ClaudeAgentOptions())._find_cli())).resolve(strict=True)
+        version = subprocess.check_output([str(binary), "--version"], text=True, timeout=10).strip()
+        sdk_version = importlib.metadata.version("claude-agent-sdk")
+        revision = claude_runtime_revision(binary)
+        version += f" / Agent SDK {sdk_version}"
+        with (
+            tempfile.TemporaryDirectory(prefix="claude-release-", dir=fixture_parent) as temp,
+            _endpoint() as allowed,
+            _endpoint() as outside,
+        ):
+            for profile in PROFILES:
+                for network in NETWORKS:
+                    matrix.append(
+                        await row(
+                            Path(temp) / f"{profile}-{network}",
+                            str(binary),
+                            document,
+                            profile,
+                            network,
+                            allowed,
+                            outside,
+                        )
+                    )
+    except (ImportError, OSError, subprocess.SubprocessError) as exc:
+        completed = {(item["profile"], item["network"]) for item in matrix}
+        matrix.extend(
+            {
+                "profile": profile,
+                "network": network,
+                "status": "red",
+                "probes": {
+                    name: {"passed": False, "detail": f"Required probe unavailable: {type(exc).__name__}: {exc}"}
+                    for name in CLAUDE_PROBES
+                },
+            }
+            for profile in PROFILES
+            for network in NETWORKS
+            if (profile, network) not in completed
+        )
+    return {
+        "schema": 1,
+        "checked_at": checked_at,
+        "launch_path": CLAUDE_PATH,
+        "policy_version": document.version,
+        "policy_revision": document.revision,
+        "runtime_version": version,
+        "runtime_revision": revision,
+        "platform": platform.platform(),
+        "matrix": matrix,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profiles", type=Path, help="Canonical profile TOML (defaults to bundled example).")
     parser.add_argument("--output", type=Path, help="Write the JSON release report to this file.")
     parser.add_argument("--fixture-parent", type=Path, help="Parent directory for disposable probe fixtures.")
+    parser.add_argument("--engine", choices=("codex", "claude"), default="codex")
+    parser.add_argument("--claude-bin", type=Path, help="Test a specific Claude CLI executable.")
     args = parser.parse_args()
+    if args.claude_bin and args.engine != "claude":
+        parser.error("--claude-bin requires --engine claude")
     document = load_profiles(args.profiles) if args.profiles else load_profiles()
-    report = asyncio.run(run_check(document, args.fixture_parent))
+    report = asyncio.run(
+        run_claude_check(document, args.fixture_parent, args.claude_bin)
+        if args.engine == "claude"
+        else run_check(document, args.fixture_parent)
+    )
     rendered = json.dumps(report, indent=2) + "\n"
     if args.output:
         args.output.write_text(rendered, encoding="utf-8")

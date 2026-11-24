@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .claude_admission import claude_admission_id
 from .codex_admission import admission_id
 from .models import EffectivePolicy, PolicyError
 from .resolve import _thaw
@@ -17,7 +18,9 @@ def _metadata(policy: EffectivePolicy) -> dict[str, str | int]:
     return {"policy_version": policy.version, "policy_revision": policy.revision, "policy_digest": policy.digest}
 
 
-def compile_claude(policy: EffectivePolicy) -> dict[str, Any]:
+def compile_claude(
+    policy: EffectivePolicy, *, release_report: Path | str | None = None, runtime_revision: str | None = None
+) -> dict[str, Any]:
     """Compile isolated Claude settings and a strict MCP allowlist."""
     servers = {
         name: {key: _thaw(value) for key, value in config.items() if key != "tools"}
@@ -36,14 +39,17 @@ def compile_claude(policy: EffectivePolicy) -> dict[str, Any]:
     allow.extend(
         f"mcp__{name}__{tool}" for name, config in sorted(policy.mcp_servers.items()) for tool in config["tools"]
     )
-    reasons = ["The launcher and workspace restrictions have not been verified."]
+    receipt = claude_admission_id(policy, release_report, runtime_revision)
+    reasons = [] if receipt is not None else ["The launcher and workspace restrictions have not been verified."]
     if "shell" in policy.tool_classes:
         reasons.append("No scoped shell commands are specified in the grant.")
     if policy.network_routes:
         reasons.append("Network route restrictions are not enforced by these settings.")
+    if release_report is not None and policy.network == "on":
+        reasons.append("Network-on Claude requires a confined tool worker.")
     return {
         **_metadata(policy),
-        "eligible": False,
+        "eligible": not reasons,
         "ineligibility_reasons": reasons,
         "launch_args": ["--setting-sources", "", "--strict-mcp-config"],
         "settings": {"permissions": {"allow": sorted(allow), "deny": sorted(deny)}},

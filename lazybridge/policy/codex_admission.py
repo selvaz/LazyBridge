@@ -29,7 +29,12 @@ REQUIRED_PROBES = (
 
 
 def admission_id(
-    policy: EffectivePolicy, release_report: Path | str | None, runtime_revision: str | None
+    policy: EffectivePolicy,
+    release_report: Path | str | None,
+    runtime_revision: str | None,
+    *,
+    launch_path: str = LAUNCH_PATH,
+    required_probes: tuple[str, ...] = REQUIRED_PROBES,
 ) -> str | None:
     """Return the identity of a complete, matching green report row."""
     if release_report is None or not runtime_revision or policy.placement != "local":
@@ -38,7 +43,7 @@ def admission_id(
         report = json.loads(Path(release_report).read_text(encoding="utf-8"))
         if (
             report["schema"] != 1
-            or report["launch_path"] != LAUNCH_PATH
+            or report["launch_path"] != launch_path
             or report["runtime_revision"] != runtime_revision
             or report["policy_version"] != policy.version
             or report["policy_revision"] != policy.revision
@@ -49,7 +54,7 @@ def admission_id(
         if len(rows) != 1 or rows[0]["status"] != "green" or rows[0]["tool_classes"] != sorted(policy.tool_classes):
             return None
         probes = rows[0]["probes"]
-        if not all(probes.get(name, {}).get("passed") is True for name in REQUIRED_PROBES):
+        if not all(probes.get(name, {}).get("passed") is True for name in required_probes):
             return None
     except (AttributeError, KeyError, OSError, TypeError, ValueError):
         return None

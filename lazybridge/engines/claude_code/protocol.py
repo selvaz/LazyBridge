@@ -13,6 +13,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from lazybridge.engines._tool_clock import ToolClock
 from lazybridge.engines.coding import ApprovalGate
+from lazybridge.policy import EffectivePolicy
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,8 @@ class ClaudeSdkOptions:
     #: session alias can be bound even when the turn then fails or times out;
     #: clients that cannot report early (fakes) may ignore it.
     on_session_id: Callable[[str], None] | None = None
+
+    effective_policy: EffectivePolicy | None = None
 
 
 @dataclass(frozen=True)

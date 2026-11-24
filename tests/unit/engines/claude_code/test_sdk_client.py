@@ -14,6 +14,7 @@ from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
 from lazybridge.engines.claude_code.sdk_client import AgentSdkClient
 from lazybridge.engines.coding import ApprovalDecision, CodingAgentConfig
 from lazybridge.ext.approval import Rule, TieredGate
+from lazybridge.policy import PolicyDenied, TaskGrant, compile_claude, policy_scope, resolve
 
 # Both tests below call AgentSdkClient._sdk_options() directly, which builds
 # a real claude_agent_sdk.ClaudeAgentOptions — needs lazybridge[claude-code].
@@ -521,11 +522,114 @@ def test_a_new_policy_field_never_displaces_an_existing_positional_argument():
 
     from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
 
-    assert [f.name for f in dataclasses.fields(ClaudeSdkOptions)][-3:] == [
+    assert [f.name for f in dataclasses.fields(ClaudeSdkOptions)][-4:] == [
         "auto_compact_window",
         "tool_observer",
         "on_session_id",
+        "effective_policy",
     ]
+
+
+@pytest.mark.parametrize("profile", ["read", "edit", "edit-and-run"])
+@pytest.mark.parametrize("network", ["off", "on"])
+def test_core_policy_is_the_native_sdk_configuration(tmp_path, profile, network):
+    from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+
+    policy = resolve(
+        profile,
+        TaskGrant(
+            tmp_path,
+            {
+                "tool_classes": ["read", "edit", "shell"],
+                "tools": ["mcp", "web"],
+                "mcp_servers": {"fixture": {"tools": ["allowed"]}},
+                "mcp_inventory": {
+                    "fixture": {"command": "fixture-command", "tools": ["allowed", "hidden"]},
+                    "ambient": {"command": "ambient-command", "tools": ["rogue"]},
+                },
+            },
+            network,
+            "local",
+        ),
+    )
+    config = CodingAgentConfig(
+        claude=dataclasses.replace(
+            CodingAgentConfig().claude,
+            permission_mode="bypassPermissions",
+            setting_sources=("user", "project", "local"),
+            allowed_tools=("Bash", "mcp__ambient__rogue"),
+        ),
+    )
+    engine = ClaudeCodeEngine(config=config, file_roots=[str(tmp_path.parent)])
+    compiled = compile_claude(policy)
+    for resume in (None, "12345678-1234-1234-1234-123456789012"):
+        with policy_scope(policy):
+            options = engine._options([_Tool()], None, resume=resume)
+        sdk = AgentSdkClient._sdk_options(options)
+        assert options.file_roots == (str(tmp_path.resolve()),)
+        assert sdk.cwd == str(tmp_path.resolve())
+        assert sdk.permission_mode == "dontAsk"
+        assert sdk.setting_sources == []
+        assert sdk.strict_mcp_config
+        assert json.loads(sdk.settings) == compiled["settings"]
+        assert sdk.mcp_servers == compiled["mcp_config"]["mcpServers"]
+        assert sdk.allowed_tools == compiled["settings"]["permissions"]["allow"]
+        assert sdk.disallowed_tools == compiled["settings"]["permissions"]["deny"]
+        assert "Bash" in sdk.disallowed_tools
+        assert "mcp__ambient__rogue" not in sdk.allowed_tools
+        assert "mcp__lazybridge__ping" not in sdk.allowed_tools
+        command = SubprocessCLITransport("", dataclasses.replace(sdk, cli_path="claude"))._build_command()
+        assert "--setting-sources=" in command
+        assert "--strict-mcp-config" in command
+        resume_flags = [arg for arg in command if arg == "--resume" or arg.startswith("--resume=")]
+        if "--resume" in resume_flags:
+            assert command[command.index("--resume") + 1] == resume
+        else:
+            assert resume_flags == ([f"--resume={resume}"] if resume is not None else [])
+
+
+async def test_unverified_policy_and_mismatched_resume_stop_before_transport(tmp_path):
+    policy = resolve("read", TaskGrant(tmp_path, {"tool_classes": ["read"]}, "off", "local"))
+
+    def unexpected_transport(**kwargs):
+        pytest.fail("an unverified governed launch reached the SDK transport")
+
+    client = AgentSdkClient(transport_factory=unexpected_transport)
+    with policy_scope(policy):
+        options = ClaudeCodeEngine()._options([], None)
+        with pytest.raises(PolicyDenied, match="restrictions have not been verified"):
+            await client.run("probe", options=options)
+        with pytest.raises(PolicyDenied, match="restrictions have not been verified"):
+            async for _ in client.stream("probe", options=options):
+                pytest.fail("a denied launch streamed a result")
+        with pytest.raises(PolicyDenied, match="active policy did not reach"):
+            await client.run("probe", options=ClaudeSdkOptions())
+
+    session_id = "12345678-1234-1234-1234-123456789012"
+    client._bind_policy_session(options, session_id)
+    changed = dataclasses.replace(policy, revision="changed")
+    with pytest.raises(PolicyDenied, match="current policy revision and grant"):
+        await client.run("probe", options=dataclasses.replace(options, resume=session_id, effective_policy=changed))
+    with pytest.raises(PolicyDenied, match="requires its active policy"):
+        await client.run("probe", options=ClaudeSdkOptions(resume=session_id))
+
+
+async def test_unavailable_canary_makes_the_whole_release_matrix_red(tmp_path, monkeypatch):
+    from lazybridge.policy import load_profiles, release_check
+
+    binary = tmp_path / "fixture-cli"
+    binary.write_bytes(b"fake-cli")
+    monkeypatch.setattr(release_check.subprocess, "check_output", lambda *args, **kwargs: "fixture")
+
+    def unavailable_endpoint():
+        raise OSError("fixture endpoint unavailable")
+
+    monkeypatch.setattr(release_check, "_endpoint", unavailable_endpoint)
+    report = await release_check.run_claude_check(load_profiles(), tmp_path, binary)
+    assert len(report["matrix"]) == 6
+    for row in report["matrix"]:
+        assert row["status"] == "red"
+        assert "fixture endpoint unavailable" in row["probes"]["tool_host_egress"]["detail"]
 
 
 # ---------------------------------------------------------------------------
