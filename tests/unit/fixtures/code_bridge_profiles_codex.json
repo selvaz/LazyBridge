@@ -10,7 +10,7 @@
     "MCP tool hosts require a separate confinement mechanism.",
     "Declared network routes are not enforced by this configuration."
   ],
-  "codex_home_config_toml": "sandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\nweb_search = \"live\"\nprojects = { \"/workspace/example-task\" = { \"trust_level\" = \"untrusted\" } }\nshell_environment_policy = { \"inherit\" = \"none\" }\nsandbox_workspace_write = { \"network_access\" = true, \"writable_roots\" = [\"/workspace/example-task\", \"/workspace/example-task/.scratch\"], \"exclude_tmpdir_env_var\" = true, \"exclude_slash_tmp\" = true }\nmcp_servers = { \"approved\" = { \"command\" = \"approved-server\", \"enabled\" = true, \"enabled_tools\" = [\"lookup\"] }, \"rogue\" = { \"enabled\" = false, \"url\" = \"http://127.0.0.1:0\" } }\n",
+  "codex_home_config_toml": "sandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\nweb_search = \"live\"\nprojects = { \"/workspace/example-task\" = { \"trust_level\" = \"untrusted\" } }\nshell_environment_policy = { \"inherit\" = \"all\", \"filters\" = { \"SYSTEMROOT\" = \"include\", \"WINDIR\" = \"include\", \"COMSPEC\" = \"include\", \"PATHEXT\" = \"include\", \"TEMP\" = \"include\", \"TMP\" = \"include\" } }\nsandbox_workspace_write = { \"network_access\" = true, \"writable_roots\" = [\"/workspace/example-task\", \"/workspace/example-task/.scratch\"], \"exclude_tmpdir_env_var\" = true, \"exclude_slash_tmp\" = true }\nmcp_servers = { \"approved\" = { \"command\" = \"approved-server\", \"enabled\" = true, \"enabled_tools\" = [\"lookup\"] }, \"rogue\" = { \"enabled\" = false, \"url\" = \"http://127.0.0.1:0\" } }\n",
   "config_overrides": {
     "sandbox_mode": "workspace-write",
     "approval_policy": "never",
@@ -21,7 +21,15 @@
       }
     },
     "shell_environment_policy": {
-      "inherit": "none"
+      "inherit": "all",
+      "filters": {
+        "SYSTEMROOT": "include",
+        "WINDIR": "include",
+        "COMSPEC": "include",
+        "PATHEXT": "include",
+        "TEMP": "include",
+        "TMP": "include"
+      }
     },
     "sandbox_workspace_write": {
       "network_access": true,

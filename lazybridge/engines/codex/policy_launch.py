@@ -17,8 +17,9 @@ from typing import Any
 from uuid import UUID
 
 from lazybridge.policy import EffectivePolicy, PolicyDenied, compile_codex
+from lazybridge.policy.compile import WINDOWS_SHELL_ENV
 
-_ENVIRONMENT = frozenset({"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL"})
+_ENVIRONMENT = frozenset((*WINDOWS_SHELL_ENV, "PATH", "LANG", "LC_ALL"))
 
 
 def runtime_revision(executable: str) -> str:

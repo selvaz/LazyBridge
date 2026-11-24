@@ -10,6 +10,8 @@ from .codex_admission import admission_id
 from .models import EffectivePolicy, PolicyError
 from .resolve import _thaw
 
+WINDOWS_SHELL_ENV = ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP")
+
 
 def _metadata(policy: EffectivePolicy) -> dict[str, str | int]:
     return {"policy_version": policy.version, "policy_revision": policy.revision, "policy_digest": policy.digest}
@@ -59,7 +61,10 @@ def compile_codex(
         "approval_policy": "never",
         "web_search": "live" if policy.network == "on" and "web" in policy.tools else "disabled",
         "projects": {str(policy.folder): {"trust_level": "untrusted"}},
-        "shell_environment_policy": {"inherit": "none"},
+        "shell_environment_policy": {
+            "inherit": "all",
+            "filters": dict.fromkeys(WINDOWS_SHELL_ENV, "include"),
+        },
         "sandbox_workspace_write": {
             "network_access": policy.network == "on",
             "writable_roots": [str(policy.folder), str(policy.scratch_folder)] if writable else [],

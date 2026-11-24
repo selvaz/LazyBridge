@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -72,6 +73,38 @@ def test_release_write_probe_writes_the_supplied_payload(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert target.read_text(encoding="utf-8") == "write-control"
+
+
+def test_windows_shell_environment_allows_only_os_bootstrap_variables(tmp_path, monkeypatch):
+    policy = resolve("read", TaskGrant(tmp_path / "task", {"tool_classes": ["read"]}, "off", "local"))
+    compiled = compile_codex(policy)
+    environment = compiled["config_overrides"]["shell_environment_policy"]
+    variables = {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"}
+    assert environment == {"inherit": "all", "filters": dict.fromkeys(variables, "include")}
+    for name in variables - {"TEMP", "TMP"}:
+        monkeypatch.setenv(name, os.environ.get(name, "bootstrap-control"))
+    state = tmp_path / "state"
+    launch = PolicyLaunch(policy, compiled, sys.executable)
+    with launch.home(None, True, state, "test-value", uuid4()) as (home, server_env):
+        shell_env = {name: server_env[name] for name in environment["filters"]}
+        assert "OPENAI_API_KEY" not in shell_env
+        assert Path(shell_env["TEMP"]) == Path(shell_env["TMP"])
+        assert Path(shell_env["TEMP"]).parent == home.parent
+        if sys.platform == "win32":
+            result = subprocess.run(
+                [sys.executable, "-c", "import socket; socket.socket(socket.AF_INET, socket.SOCK_STREAM).close()"],
+                env=shell_env,
+                capture_output=True,
+                timeout=5,
+            )
+            assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "status, output, expected", [(0, "fixture-ok", True), (4, "", False), (1, "WinError 10106", None)]
+)
+def test_release_egress_outcome_distinguishes_setup_failures(status, output, expected):
+    assert release_check._egress_outcome(status, output) is expected
 
 
 def test_durable_threads_bind_an_executor_credential_id(tmp_path):

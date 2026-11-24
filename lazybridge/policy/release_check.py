@@ -63,6 +63,7 @@ for line in sys.stdin:
 """
 
 _COMMAND = """
+import errno
 from pathlib import Path
 from urllib.request import urlopen
 import sys
@@ -72,7 +73,12 @@ if kind == "network":
         with urlopen(value, timeout=3) as response:
             print(response.read().decode())
     except OSError as exc:
-        raise SystemExit(str(exc)) from exc
+        print(str(exc), file=sys.stderr)
+        reason = getattr(exc, "reason", exc)
+        blocked = getattr(reason, "errno", None) in (
+            errno.EACCES, errno.EPERM, errno.ECONNREFUSED, errno.ETIMEDOUT
+        ) or getattr(reason, "winerror", None) in (10013, 10060, 10061)
+        raise SystemExit(4 if blocked or isinstance(reason, TimeoutError) else 1) from exc
 elif kind == "read":
     print(Path(value).read_text(encoding="utf-8"))
 elif kind == "write":
@@ -86,6 +92,14 @@ elif kind == "write":
 
 def _command_args(kind: str, value: str, payload: str = "") -> list[str]:
     return [sys.executable, "-c", _COMMAND, kind, value, payload]
+
+
+def _egress_outcome(status: int | None, output: str) -> bool | None:
+    if status == 0 and output.strip() == "fixture-ok":
+        return True
+    if status == 4:
+        return False
+    return None
 
 
 @contextmanager
@@ -289,16 +303,15 @@ async def _row(
         )
         allowed_status, allowed_output = await command("network", allowed)
         outside_status, outside_output = await command("network", outside)
-        allowed_ok, outside_ok = allowed_status == 0, outside_status == 0
+        allowed_ok = _egress_outcome(allowed_status, allowed_output)
+        outside_ok = _egress_outcome(outside_status, outside_output)
         expected_egress = network == "on" and "shell" in policy.tool_classes
         observe(
             "shell_egress",
-            control_ok
-            and allowed_ok == expected_egress
-            and (not allowed_ok or allowed_output.strip() == "fixture-ok")
-            and not outside_ok,
+            control_ok and allowed_ok is expected_egress and outside_ok is False,
             f"Shell endpoint reachability [declared, undeclared]: {[allowed_ok, outside_ok]}. "
-            f"Command control: {control_ok}. Undeclared output: {' '.join(outside_output.split())[:160]}",
+            f"Command control: {control_ok}. Endpoint output [declared, undeclared]: "
+            f"{[' '.join(output.split())[:160] for output in (allowed_output, outside_output)]}",
         )
 
     async def probe(request: Any, thread: dict[str, Any]) -> bool:
