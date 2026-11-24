@@ -16,7 +16,8 @@ from threading import Event
 from typing import Any
 
 import pytest
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key
 
 from lazybridge.ext.receipt import IssuerKey, PublicationReceipt, VerificationResult, canonical_bytes, sign, verify
 from lazybridge.ext.receipt.__main__ import _verify_json
@@ -248,17 +249,9 @@ def test_changed_signed_values_fail_before_claim_checks(fields: dict[str, Any], 
     )
 
 
-@pytest.mark.parametrize(
-    ("expected_head", "code", "message"),
-    [(None, 0, "valid"), (HEAD, 0, "valid"), (OTHER_HEAD, 1, "live_head_mismatch")],
-)
-def test_cli_exit_codes(
-    fields: dict[str, Any], key: IssuerKey, tmp_path: Path, expected_head: str | None, code: int, message: str
-) -> None:
-    receipt_path = tmp_path / "receipt.json"
-    receipt_path.write_text(sign(PublicationReceipt.model_validate(fields), key).model_dump_json(), encoding="utf-8")
-    public_path = tmp_path / "issuer.pub.pem"
-    public_path.write_bytes(key.public_key_pem())
+def _run_cli(
+    receipt_path: Path, public_path: Path, expected_head: str | None = None
+) -> subprocess.CompletedProcess[str]:
     command = [
         sys.executable,
         "-m",
@@ -270,8 +263,49 @@ def test_cli_exit_codes(
     ]
     if expected_head is not None:
         command += ["--expected-head", expected_head]
-    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    return subprocess.run(command, check=False, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize(
+    ("expected_head", "code", "message"),
+    [(None, 0, "valid"), (HEAD, 0, "valid"), (OTHER_HEAD, 1, "live_head_mismatch")],
+)
+def test_cli_exit_codes(
+    fields: dict[str, Any], key: IssuerKey, tmp_path: Path, expected_head: str | None, code: int, message: str
+) -> None:
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(sign(PublicationReceipt.model_validate(fields), key).model_dump_json(), encoding="utf-8")
+    public_path = tmp_path / "issuer.pub.pem"
+    public_path.write_bytes(key.public_key_pem())
+    result = _run_cli(receipt_path, public_path, expected_head)
     assert result.returncode == code, result.stderr
+    assert result.stdout.strip() == message
+
+
+@pytest.mark.parametrize(
+    ("key_file", "message"),
+    [
+        ("missing", "invalid_public_key"),
+        ("malformed", "invalid_public_key"),
+        ("x25519", "invalid_public_key"),
+        ("wrong_ed25519", "bad_signature"),
+    ],
+)
+def test_cli_public_key_errors(
+    fields: dict[str, Any], key: IssuerKey, tmp_path: Path, key_file: str, message: str
+) -> None:
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(sign(PublicationReceipt.model_validate(fields), key).model_dump_json(), encoding="utf-8")
+    public_path = tmp_path / "issuer.pub.pem"
+    if key_file == "malformed":
+        public_path.write_bytes(b"invalid PEM")
+    elif key_file == "x25519":
+        public_key = X25519PublicKey.from_public_bytes(b"\x01" * 32)
+        public_path.write_bytes(public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
+    elif key_file == "wrong_ed25519":
+        public_path.write_bytes(IssuerKey(tmp_path / "other.pem").public_key_pem())
+    result = _run_cli(receipt_path, public_path)
+    assert result.returncode == 1, result.stderr
     assert result.stdout.strip() == message
 
 

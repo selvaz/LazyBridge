@@ -66,6 +66,7 @@ receipts.
 | Reason | Meaning |
 | --- | --- |
 | `bad_signature` | The supplied key could not authenticate the receipt. |
+| `invalid_public_key` | The CLI could not read an Ed25519 public key in PEM format from the supplied file. |
 | `unknown_version` | The signature is valid and the receipt version is unsupported. |
 | `issuer_mismatch` | The signed issuer fingerprint or key ID differs from the verification key. |
 | `review_head_mismatch` | The review refers to a different commit. |

@@ -23,6 +23,9 @@ def _unique_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _verify_json(data: str, public_key: bytes, expected_head_sha: str | None) -> VerificationResult:
+    key = _load_public_key(public_key)
+    if key is None:
+        return VerificationResult(False, "invalid_public_key")
     try:
         fields = json.loads(data, object_pairs_hook=_unique_fields)
         if not isinstance(fields, dict):
@@ -33,8 +36,7 @@ def _verify_json(data: str, public_key: bytes, expected_head_sha: str | None) ->
         return VerificationResult(False, "invalid_receipt")
 
     # Authenticate the wire fields before parsing them into a typed model.
-    key = _load_public_key(public_key)
-    if key is None or not _signature_valid(body, signature, key):
+    if not _signature_valid(body, signature, key):
         return VerificationResult(False, "bad_signature")
     if type(fields.get("receipt_version")) is not int or fields["receipt_version"] != 1:
         return VerificationResult(False, "unknown_version")
@@ -64,7 +66,7 @@ def main() -> int:
     try:
         public_key = args.public_key.read_bytes()
     except OSError:
-        print("bad_signature")
+        print("invalid_public_key")
         return 1
 
     result = _verify_json(data, public_key, args.expected_head)
