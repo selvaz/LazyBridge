@@ -125,6 +125,7 @@ class Agent:
 
     _is_lazy_agent = True  # recognised by _wrap_tool()
     _fresh_review = False  # set by policy.make_reviewer for isolated fallback reviewers
+    _read_only_review = False  # set by policy.make_reviewer for all reviewers it creates
 
     def __init__(
         self,
@@ -497,6 +498,7 @@ class Agent:
                 else None,
                 work_units=getattr(self, "work_units", 1),
                 fresh=self._fresh_review,
+                read_only_review=self._read_only_review,
             ),
             _guarded_output() if guard else nullcontext(),
         ):
@@ -854,6 +856,7 @@ class Agent:
             else None,
             work_units=getattr(self, "work_units", 1),
             fresh=self._fresh_review,
+            read_only_review=self._read_only_review,
             bind=False,
         ) as invocation:
             gen = self._stream_scoped(task, images=images, audio=audio)
@@ -1213,6 +1216,7 @@ class Agent:
         )
         base_kwargs.update(overrides)
         derived = Agent(**base_kwargs)
+        derived._read_only_review = self._read_only_review
         # __init__ stamps engine._agent_name on every construction; since the engine
         # object is shared, restore the original so base-agent runs continue to
         # log/emit under the correct identity.

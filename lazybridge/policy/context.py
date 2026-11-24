@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from threading import RLock
 
 from .models import EffectivePolicy, PolicyError, TaskGrant
-from .resolve import child_within_parent, validate_child_policy
+from .resolve import _read_only_review_policy, child_within_parent, validate_child_policy
 from .review import ReviewIndependence, ReviewMode, ReviewSelection, select_reviewer
 
 
@@ -207,10 +207,13 @@ def policy_scope(
     role: str | None = None,
     engine: str | None = None,
     fresh: bool = False,
+    read_only_review: bool = False,
 ) -> Iterator[PolicyContext | None]:
     """Bind policy authority for exactly one agent invocation."""
 
     effective, parent = resolve_invocation_policy(configured)
+    if read_only_review and effective is not None:
+        effective = _read_only_review_policy(effective)
     budget = parent.tree_budget if parent is not None else tree_budget
     if effective is None and budget is None:
         yield None

@@ -13,7 +13,10 @@ from lazybridge.policy import (
     TaskGrant,
     TreeBudget,
     child_within_parent,
+    compile_claude,
+    compile_codex,
     current_policy_context,
+    load_profiles,
     make_reviewer,
     policy_scope,
     resolve,
@@ -350,6 +353,93 @@ async def test_fresh_reviewer_can_stream_from_a_reserved_slot(monkeypatch):
         policy_scope(None, child_id="writer", reserve_review=True, engine="codex"),
     ):
         assert [chunk async for chunk in reviewer.stream("review this")] == ["review"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("available", [{"claude"}, {"claude", "codex"}])
+async def test_factory_reviewer_cannot_inherit_writer_edit_shell_or_mcp_grants(tmp_path, monkeypatch, available):
+    writer_engine = ClaudeCodeEngine(cwd=str(tmp_path))
+    reviewer, _ = make_reviewer(writer_engine, available, "opposite-or-fresh")
+    writer_policy = resolve(
+        "edit-and-run",
+        TaskGrant(
+            tmp_path,
+            {
+                "tool_classes": ["read", "edit", "shell"],
+                "tools": ["web", "mcp"],
+                "network_routes": ["https://example.test"],
+                "mcp_servers": {"writer": {"tools": ["modify"]}},
+                "mcp_inventory": {"writer": {"command": "writer-server", "tools": ["modify"]}},
+            },
+            "on",
+            "local",
+        ),
+    )
+    read = Tool(lambda: "read", name="read", policy_grant="read")
+    edit = Tool(lambda: "edited", name="edit", policy_grant="edit")
+    shell = Tool(lambda: "ran", name="shell", policy_grant="shell")
+
+    async def run(engine, env, **kwargs):
+        active = current_policy_context().effective_policy
+        if engine is writer_engine:
+            assert active == writer_policy
+            assert await edit.run() == "edited"
+            assert await shell.run() == "ran"
+            return Envelope(payload="draft")
+
+        assert active.profile == "read"
+        assert active.folder == writer_policy.folder
+        assert active.placement == writer_policy.placement
+        assert active.network == "off"
+        assert active.tool_classes == {"read"}
+        assert not active.tools
+        assert not active.mcp_servers
+        assert await read.run() == "read"
+        for tool in (edit, shell):
+            assert not tool.granted_by_active_policy()
+            with pytest.raises(PolicyDenied, match=tool.name):
+                await tool.run()
+
+        if isinstance(engine, ClaudeCodeEngine):
+            options = engine._options([], None)
+            compiled = compile_claude(options.effective_policy)
+            permissions = compiled["settings"]["permissions"]
+            assert set(permissions["allow"]) == {"Read", "Glob", "Grep"}
+            assert {"Edit", "Write", "NotebookEdit", "Bash"} <= set(permissions["deny"])
+            assert not compiled["mcp_config"]["mcpServers"]
+        else:
+            config = compile_codex(active)["config_overrides"]
+            assert config["sandbox_mode"] == "read-only"
+            assert config["features"]["shell_tool"] is False
+            assert config["mcp_servers"]["writer"]["enabled"] is False
+        return Envelope(payload="approved")
+
+    monkeypatch.setattr(ClaudeCodeEngine, "run", run)
+    monkeypatch.setattr(CodexEngine, "run", run)
+    writer = Agent(engine=writer_engine, name="writer", policy=writer_policy, verify=reviewer)
+    assert (await writer.run("write")).text() == "draft"
+
+
+@pytest.mark.asyncio
+async def test_factory_reviewer_stream_respects_parent_without_read_grant(tmp_path, monkeypatch):
+    document = replace(load_profiles(), revision="review-test")
+    writer_policy = resolve(
+        "edit-and-run", TaskGrant(tmp_path, {"tool_classes": ["edit", "shell"]}, "off", "local"), document
+    )
+    reviewer, _ = make_reviewer(ClaudeCodeEngine(cwd=str(tmp_path)), {"codex"})
+    reviewer = reviewer.derive(name="streaming-reviewer")
+
+    async def stream(engine, env, **kwargs):
+        active = current_policy_context().effective_policy
+        assert active.profile == "read"
+        assert active.revision == writer_policy.revision
+        assert not active.tool_classes
+        yield "review"
+
+    monkeypatch.setattr(CodexEngine, "stream", stream)
+    with policy_scope(writer_policy) as parent:
+        assert [chunk async for chunk in reviewer.stream("review this")] == ["review"]
+        assert current_policy_context() is parent
 
 
 def test_reviewer_factory_prefers_opposite_engine_and_rejects_a_duplicate_fallback_model():

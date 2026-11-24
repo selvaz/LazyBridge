@@ -78,6 +78,9 @@ def make_reviewer(
     and no Memory, Store, sources, or application tools. Pass the artifact
     and any review evidence explicitly to the returned Agent.
 
+    Under an effective writer policy, each invocation derives an offline
+    read policy for the writer's folder.
+
     For reserved reviews, configure the enclosing TreeBudget with the same
     mode and available engines. The returned Agent can claim that slot.
 
@@ -111,4 +114,5 @@ def make_reviewer(
 
     reviewer = Agent(engine=engine, name="reviewer", session=Session(), budget_role="reviewer")
     reviewer._fresh_review = fresh
+    reviewer._read_only_review = True
     return reviewer, selection.independence
