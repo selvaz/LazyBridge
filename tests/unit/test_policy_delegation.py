@@ -3,16 +3,21 @@ from dataclasses import replace
 
 import pytest
 
-from lazybridge import Agent, Plan, Step
+from lazybridge import Agent, ClaudeCodeEngine, CodexEngine, Memory, Plan, Session, Step, Store
 from lazybridge.envelope import Envelope
 from lazybridge.policy import (
     PolicyBudgetExceeded,
     PolicyDenied,
+    PolicyError,
     PolicyWidening,
     TaskGrant,
     TreeBudget,
     child_within_parent,
+    compile_claude,
+    compile_codex,
     current_policy_context,
+    load_profiles,
+    make_reviewer,
     policy_scope,
     resolve,
 )
@@ -256,6 +261,195 @@ async def test_stream_holds_active_slot_until_closed(tmp_path):
             await other.run("x")
         await stream.aclose()
         assert (await other.run("x")).ok
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine_name", ["claude", "codex"])
+async def test_same_provider_review_verifier_uses_a_fresh_engine_and_isolated_state(tmp_path, monkeypatch, engine_name):
+    if engine_name == "claude":
+        writer_engine = ClaudeCodeEngine("sonnet", cwd=str(tmp_path), session_id="writer-session")
+        preferred_model, expected_model = "opus", "claude-opus-5-5"
+    else:
+        writer_engine = CodexEngine("sol", cwd=str(tmp_path), thread_id="writer-thread")
+        preferred_model, expected_model = "terra", "gpt-6.1-terra"
+
+    mode = "opposite-or-fresh"
+    available = {engine_name}
+    reviewer, independence = make_reviewer(writer_engine, available, mode, preferred_model=preferred_model)
+    assert independence == "same-provider-fresh"
+    assert type(reviewer.engine) is type(writer_engine)
+    assert reviewer.engine is not writer_engine
+    assert reviewer.engine.cwd == writer_engine.cwd
+    assert reviewer.engine.model == expected_model
+    assert reviewer.engine.session_alias is None
+    if engine_name == "claude":
+        assert reviewer.engine.session_id is None
+        assert reviewer.engine.session_mode == "memory"
+        assert not reviewer.engine.persist_session
+    else:
+        assert reviewer.engine.thread_id is None
+        assert not reviewer.engine.persist_thread
+
+    writer_session = Session()
+    writer_memory = Memory()
+    writer_memory.add("writer-only history", "writer-only answer")
+    writer_store = Store()
+    writer_store.write("blackboard", "writer-only work in progress")
+    blackboard = Tool(lambda: writer_store.read("blackboard"), name="blackboard")
+    seen = []
+
+    async def run(engine, env, *, tools, memory, session, **kwargs):
+        if engine is writer_engine:
+            assert session is writer_session
+            assert memory is writer_memory
+            assert tools == [blackboard]
+            return Envelope(payload="draft")
+        assert engine is reviewer.engine
+        assert session is reviewer.session
+        assert session is not writer_session
+        assert memory is None
+        assert not tools
+        assert "draft" in env.task
+        assert env.context is None
+        seen.append(current_policy_context().review_independence)
+        return Envelope(payload="approved")
+
+    monkeypatch.setattr(type(writer_engine), "run", run)
+    writer = Agent(
+        engine=writer_engine,
+        name="writer",
+        memory=writer_memory,
+        store=writer_store,
+        sources=["writer-only evidence"],
+        tools=[blackboard],
+        session=writer_session,
+        verify=reviewer,
+        reserve_review=True,
+    )
+    assert reviewer.store is None
+    assert not reviewer.sources
+    budget = TreeBudget(max_active_children=2, review_mode=mode, available_engines=available)
+    with policy_scope(None, tree_budget=budget):
+        assert (await writer.run("write")).text() == "draft"
+    assert seen == ["same-provider-fresh"]
+
+
+@pytest.mark.asyncio
+async def test_fresh_reviewer_can_stream_from_a_reserved_slot(monkeypatch):
+    mode = "opposite-or-fresh"
+    available = {"codex"}
+    writer_engine = CodexEngine("terra", thread_id="writer-thread")
+    reviewer, independence = make_reviewer(writer_engine, available, mode)
+    assert reviewer.engine.model == writer_engine.model
+
+    async def stream(engine, env, **kwargs):
+        assert current_policy_context().review_independence == independence
+        yield "review"
+
+    monkeypatch.setattr(CodexEngine, "stream", stream)
+    budget = TreeBudget(max_active_children=2, review_mode=mode, available_engines=available)
+    with (
+        policy_scope(None, tree_budget=budget),
+        policy_scope(None, child_id="writer", reserve_review=True, engine="codex"),
+    ):
+        assert [chunk async for chunk in reviewer.stream("review this")] == ["review"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("available", [{"claude"}, {"claude", "codex"}])
+async def test_factory_reviewer_cannot_inherit_writer_edit_shell_or_mcp_grants(tmp_path, monkeypatch, available):
+    writer_engine = ClaudeCodeEngine(cwd=str(tmp_path))
+    reviewer, _ = make_reviewer(writer_engine, available, "opposite-or-fresh")
+    writer_policy = resolve(
+        "edit-and-run",
+        TaskGrant(
+            tmp_path,
+            {
+                "tool_classes": ["read", "edit", "shell"],
+                "tools": ["web", "mcp"],
+                "network_routes": ["https://example.test"],
+                "mcp_servers": {"writer": {"tools": ["modify"]}},
+                "mcp_inventory": {"writer": {"command": "writer-server", "tools": ["modify"]}},
+            },
+            "on",
+            "local",
+        ),
+    )
+    read = Tool(lambda: "read", name="read", policy_grant="read")
+    edit = Tool(lambda: "edited", name="edit", policy_grant="edit")
+    shell = Tool(lambda: "ran", name="shell", policy_grant="shell")
+
+    async def run(engine, env, **kwargs):
+        active = current_policy_context().effective_policy
+        if engine is writer_engine:
+            assert active == writer_policy
+            assert await edit.run() == "edited"
+            assert await shell.run() == "ran"
+            return Envelope(payload="draft")
+
+        assert active.profile == "read"
+        assert active.folder == writer_policy.folder
+        assert active.placement == writer_policy.placement
+        assert active.network == "off"
+        assert active.tool_classes == {"read"}
+        assert not active.tools
+        assert not active.mcp_servers
+        assert await read.run() == "read"
+        for tool in (edit, shell):
+            assert not tool.granted_by_active_policy()
+            with pytest.raises(PolicyDenied, match=tool.name):
+                await tool.run()
+
+        if isinstance(engine, ClaudeCodeEngine):
+            options = engine._options([], None)
+            compiled = compile_claude(options.effective_policy)
+            permissions = compiled["settings"]["permissions"]
+            assert set(permissions["allow"]) == {"Read", "Glob", "Grep"}
+            assert {"Edit", "Write", "NotebookEdit", "Bash"} <= set(permissions["deny"])
+            assert not compiled["mcp_config"]["mcpServers"]
+        else:
+            config = compile_codex(active)["config_overrides"]
+            assert config["sandbox_mode"] == "read-only"
+            assert config["features"]["shell_tool"] is False
+            assert config["mcp_servers"]["writer"]["enabled"] is False
+        return Envelope(payload="approved")
+
+    monkeypatch.setattr(ClaudeCodeEngine, "run", run)
+    monkeypatch.setattr(CodexEngine, "run", run)
+    writer = Agent(engine=writer_engine, name="writer", policy=writer_policy, verify=reviewer)
+    assert (await writer.run("write")).text() == "draft"
+
+
+@pytest.mark.asyncio
+async def test_factory_reviewer_stream_respects_parent_without_read_grant(tmp_path, monkeypatch):
+    document = replace(load_profiles(), revision="review-test")
+    writer_policy = resolve(
+        "edit-and-run", TaskGrant(tmp_path, {"tool_classes": ["edit", "shell"]}, "off", "local"), document
+    )
+    reviewer, _ = make_reviewer(ClaudeCodeEngine(cwd=str(tmp_path)), {"codex"})
+    reviewer = reviewer.derive(name="streaming-reviewer")
+
+    async def stream(engine, env, **kwargs):
+        active = current_policy_context().effective_policy
+        assert active.profile == "read"
+        assert active.revision == writer_policy.revision
+        assert not active.tool_classes
+        yield "review"
+
+    monkeypatch.setattr(CodexEngine, "stream", stream)
+    with policy_scope(writer_policy) as parent:
+        assert [chunk async for chunk in reviewer.stream("review this")] == ["review"]
+        assert current_policy_context() is parent
+
+
+def test_reviewer_factory_prefers_opposite_engine_and_rejects_a_duplicate_fallback_model():
+    writer = ClaudeCodeEngine("sonnet")
+    reviewer, independence = make_reviewer(writer, {"claude", "codex"}, "opposite-or-fresh")
+    assert isinstance(reviewer.engine, CodexEngine)
+    assert independence == "opposite-engine"
+
+    with pytest.raises(PolicyError, match="preferred reviewer model must differ"):
+        make_reviewer(writer, {"claude"}, "opposite-or-fresh", preferred_model="sonnet")
 
 
 @pytest.mark.asyncio

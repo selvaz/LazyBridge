@@ -219,6 +219,7 @@ def _resolve(
         inventory_tools,
         _digest(canonical),
         removed_grants=removed_grants,
+        _document=document,
     )
 
 
@@ -250,6 +251,23 @@ def child_within_parent(
         raise PolicyWidening("tool not granted to parent")
     validate_child_policy(parent, child)
     return child
+
+
+def _read_only_review_policy(parent: EffectivePolicy) -> EffectivePolicy:
+    # Retain inventory names so native launchers can disable the writer's servers.
+    request = TaskGrant(
+        folder=parent.folder,
+        grants={
+            "tool_classes": parent.tool_classes & {"read"},
+            "scratch_folder": parent.scratch_folder,
+            "mcp_inventory": {
+                name: {"tools": parent.mcp_inventory_tools.get(name, ())} for name in parent.mcp_inventory
+            },
+        },
+        network="off",
+        placement=parent.placement,
+    )
+    return child_within_parent(parent, request, profile="read", document=parent._document)
 
 
 def validate_child_policy(parent: EffectivePolicy, child: EffectivePolicy) -> None:

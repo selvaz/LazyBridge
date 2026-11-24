@@ -908,8 +908,9 @@ class ApprovalQueue:
         return self._write_ticket(ticket)
 
     def get_ticket(self, approval_id: str) -> ApprovalTicket | None:
-        """Return the ticket view, with elapsed expiry reflected on pending typed tickets.
+        """Read a ticket, reporting elapsed expiry for pending typed tickets.
 
+        Use :meth:`expire_ticket` to persist the transition.
         Use :meth:`read_feedback_answer` to retrieve an answer with requester bindings.
         """
         with self._anchored() as anchored:
@@ -951,7 +952,7 @@ class ApprovalQueue:
         if limit <= 0:
             raise ValueError(f"limit must be positive, got {limit}")
         tickets = self._pending_tickets()
-        tickets.sort(key=lambda ticket: ticket.created_at)
+        tickets.sort(key=lambda t: t.created_at)
         return tickets[:limit]
 
     def _pending_tickets(self) -> list[ApprovalTicket]:
@@ -995,26 +996,12 @@ class ApprovalQueue:
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
 
     def expire_ticket(self, approval_id: str) -> bool:
-        """Record that nobody answered in time.
+        """Persist expiry for a ticket whose stored status is still pending.
 
-        Meant to be called by a waiter that is giving up (see
-        :class:`StoreApprovalChannel`'s ``wait_budget``), not by a
-        background sweep -- the read-time expiry filter in ``_actionable``/
-        ``list_pending_tickets`` still has to stand on its own, because a
-        waiter can die with its process and leave a record nobody will
-        ever come back to transition. This only closes the ones a caller
-        actually watched expire.
-
-        Without it a ticket sits at ``"pending"`` forever even once it is
-        truly dead, so any count of "waiting on a human" mixes live
-        questions with corpses, and nothing distinguishes "the ticket was
-        answered no" from "nobody ever saw it" -- two different situations
-        that deserve two different responses, not one shared status.
-
-        CAS: only transitions a ticket that is still ``"pending"`` at the
-        moment this runs -- a concurrent approve/reject that lands first
-        wins, and this call simply reports ``False``, the same "lost the
-        race" contract every other mutator in this class already has.
+        Callers can use this after observing expiry in :meth:`get_ticket`
+        or to explicitly close a pending ticket before its deadline. A
+        concurrent decision that wins the compare-and-swap is preserved,
+        and this method returns ``False``.
         """
         key = self._key(approval_id)
         with self._anchored() as anchored:

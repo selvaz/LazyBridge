@@ -64,3 +64,4 @@ class EffectivePolicy:
     mcp_inventory_tools: Mapping[str, tuple[str, ...]]
     digest: str
     removed_grants: tuple[tuple[str, str], ...] = field(default=(), compare=False)
+    _document: ProfileDocument | None = field(default=None, compare=False, repr=False)
