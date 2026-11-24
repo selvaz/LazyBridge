@@ -75,6 +75,7 @@ async def test_plan_verifier_fallback_and_async_child_keep_context(tmp_path):
     producer = MockAgent("answer", name="producer", policy=authority)
     verifier = MockAgent(record, name="verifier")
     from lazybridge._verify import verify_with_retry
+
     with policy_scope(authority):
         await verify_with_retry(producer, Envelope(task="verify"), verifier)
 
@@ -107,16 +108,17 @@ def test_resolved_child_checks_scratch_and_mcp_configuration(tmp_path):
     from dataclasses import replace
 
     parent = policy(tmp_path)
-    with policy_scope(parent):
-        with pytest.raises(PolicyWidening, match="scratch"):
-            with policy_scope(replace(parent, scratch_folder=tmp_path / "other")):
-                pass
+    with (
+        policy_scope(parent),
+        pytest.raises(PolicyWidening, match="scratch"),
+        policy_scope(replace(parent, scratch_folder=tmp_path / "other")),
+    ):
+        pass
     server = {"tools": ("read",), "command": "safe"}
     parent = replace(parent, mcp_servers={"server": server}, mcp_inventory=("server",))
     child = replace(parent, mcp_servers={"server": {**server, "command": "unsafe"}})
-    with policy_scope(parent), pytest.raises(PolicyWidening, match="configuration"):
-        with policy_scope(child):
-            pass
+    with policy_scope(parent), pytest.raises(PolicyWidening, match="configuration"), policy_scope(child):
+        pass
 
 
 @pytest.mark.asyncio
@@ -201,6 +203,5 @@ async def test_untagged_tools_fail_closed_only_under_policy(tmp_path):
     agent = Agent(engine=engine, name="root", tools=[tool], policy=policy(tmp_path))
     assert (await agent.run("work")).ok
     assert engine.seen == [[]]
-    with policy_scope(agent.policy):
-        with pytest.raises(PolicyDenied):
-            await tool.run()
+    with policy_scope(agent.policy), pytest.raises(PolicyDenied):
+        await tool.run()
