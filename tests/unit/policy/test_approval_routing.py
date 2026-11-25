@@ -78,17 +78,18 @@ def tree(
     worker_authority: frozenset[str] = AUTHORITY,
     worker_profile: str = "edit-and-run",
     worker_label: str = "worker",
+    requester_label: str = "sub-worker",
 ) -> Iterator[tuple[tuple[PolicyContext, ...], Callable[[PolicyContext], None]]]:
     root_policy = resolve("edit-and-run", grant(folder, AUTHORITY))
     with ExitStack() as cleanup:
         scopes: list[tuple[PolicyContext, ExitStack]] = []
-        for name, policy in (
-            ("orchestrator", root_policy),
-            ("worker", child_within_parent(root_policy, grant(folder, worker_authority), profile=worker_profile)),
-            ("sub-worker", grant(folder, worker_authority)),
+        worker_policy = child_within_parent(root_policy, grant(folder, worker_authority), profile=worker_profile)
+        for name, label, policy in (
+            ("orchestrator", "orchestrator", root_policy),
+            ("worker", worker_label, worker_policy),
+            ("sub-worker", requester_label, grant(folder, worker_authority)),
         ):
             stack = cleanup.enter_context(ExitStack())
-            label = worker_label if name == "worker" else name
             context = stack.enter_context(_policy_scope(policy, approval_actor=label, agent_id=name))
             assert context
             scopes.append((context, stack))
@@ -121,21 +122,28 @@ def assignee(ticket: ApprovalTicket) -> str:
     return grant_used.actor
 
 
-@pytest.mark.parametrize("worker_label", ["worker", "owner"])
-def test_a1_nearest_authorized_parent_decides(tmp_path: Path, worker_label: str) -> None:
+@pytest.mark.parametrize(
+    ("worker_label", "requester_label"),
+    [("worker", "sub-worker"), ("owner", "sub-worker"), ("worker", "owner"), ("worker", "worker")],
+)
+def test_a1_nearest_authorized_parent_decides(tmp_path: Path, worker_label: str, requester_label: str) -> None:
     store = Store()
     owner_credential = provision(store)
     queue = ApprovalQueue(store)
-    with tree(tmp_path, worker_label=worker_label) as (chain, unwind_to):
+    with tree(tmp_path, worker_label=worker_label, requester_label=requester_label) as (chain, unwind_to):
         orchestrator, worker, requester = chain
         req = request(requester)
         ticket = queue.create_typed_ticket(req, requester=requester)
         assert (ticket.tier, ticket.action_class) == ("routine", "run_tests")
         assert ticket.requester_path == tuple(context.invocation_id for context in chain)
         assert assignee(ticket) == worker.invocation_id
+        assert ticket.route is not None
+        assert [grant.actor for grant in ticket.route.remaining] == [orchestrator.invocation_id, "owner"]
+        assert ticket.route.hops[0].from_actor == requester.invocation_id
         view = ApproverContext.from_invocation(worker).model_copy(update={"actor": "unrelated-label"})
         assert queue.list_pending_tickets(assignee=view) == [ticket]
         assert queue.list_pending_tickets(assignee=OWNER) == []
+        assert not queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
         assert not queue.decide_typed_ticket(ticket.approval_id, credential=owner_credential, verdict="approved")
         unwind_to(worker)
         assert queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")

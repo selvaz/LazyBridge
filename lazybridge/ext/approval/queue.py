@@ -1212,13 +1212,12 @@ class ApprovalQueue:
                 ticket.status != "pending"
                 or ticket.expires_at <= now
                 or route is None
-                or route.assignee is None
                 or not route.remaining
                 or not self._has_ticket_authority(ticket, principal, route.assignee)
             ):
                 return False
             hop = ApprovalHop(
-                from_actor=route.assignee.actor, to=route.remaining[0], at=now, reason="forwarded", summary=summary
+                from_actor=principal.actor, to=route.remaining[0], at=now, reason="forwarded", summary=summary
             )
             updated = ticket.model_copy(update={"route": route.advance(self._escalation_timeout, now=now, hop=hop)})
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))

@@ -281,7 +281,7 @@ def policy_scope(
     read_only_review: bool = False,
     approval_actor: str | None = None,
 ) -> Iterator[PolicyContext | None]:
-    """Bind policy authority for exactly one agent invocation."""
+    """Bind policy authority for one invocation, with an optional display label."""
 
     with _policy_scope(
         configured,

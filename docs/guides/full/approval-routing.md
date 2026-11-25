@@ -27,11 +27,13 @@ external tier. The registry rejects tiers below a configured class's minimum.
 Pass the current requester's `PolicyContext` to `create_typed_ticket` for a
 manual flow or `submit_typed_request` to try a card first. Agent names and the
 optional `approval_actor` label on low-level scopes are display hints. They
-can appear in request metadata and card receipts. Routing and decision checks
-use the core's invocation IDs, agent identities, and effective policy grants,
-plus the owner principal backed by a registry credential. Nested low-level
-scopes retain the enclosing agent's identity. The ticket records the
-requester path and the route's policy grants without storing credentials.
+can appear in request metadata and card receipts. The request digest binds
+the original `requested_by` metadata for later execution checks. Routing and
+decision checks use the core's invocation IDs, agent identities, and effective
+policy grants, plus the owner principal backed by a registry credential.
+Nested low-level scopes retain the enclosing agent's identity. The ticket
+records the requester path and the route's policy grants without storing
+credentials.
 
 An ancestor uses the credential of its active invocation. For example, after
 a test runner files a ticket, its coordinator resumes and decides it.
@@ -116,8 +118,9 @@ Set `owner_actor` to the owner principal. Tickets without a requester path
 go to the owner, including historical unclassified tickets. NC-14 disables
 independent approval pending the task 1b authentication review. The
 `independent_approvers` option is accepted for compatibility and has no effect.
-Previously filed tickets retain their recorded hops. Refile any pending
-ticket whose stored route omitted the owner.
+Previously filed tickets retain their recorded hops. A ticket assigned to an
+independent approver can reach its recorded owner hop on timeout. Refile any
+pending ticket whose stored route omitted the owner.
 
 ## Pool calls and service agents
 
