@@ -252,7 +252,7 @@ def test_a12_class_card_specialisation_checks_branch_path_uses_and_expiry(tmp_pa
         )
         with policy_scope(grant(tmp_path, copy), approval_actor="worker") as worker:
             assert worker
-            for action in (commit(branch="other"), commit(path="docs/readme.md"), commit(path="src-other/item")):
+            for action in (commit(branch="other"), commit(path="docs/index.md"), commit(path="src-other/item")):
                 assert isinstance(
                     queue.submit_typed_request(request(worker, action, action_class="local_commit"), requester=worker),
                     ApprovalTicket,

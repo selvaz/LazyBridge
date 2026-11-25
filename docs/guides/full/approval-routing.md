@@ -97,12 +97,13 @@ bindings immediately before carrying out an approved effect.
 ## Provision operator credentials
 
 Provision owner credentials outside agent execution.
-The operator CLI prints the secret once and stores its hash with the principal
-and roles in the registry. For example, for the default owner on the default
-queue prefix, run
+The operator CLI writes the secret to a new file and stores its hash with the
+principal and roles in the registry. Choose an operator-controlled directory.
+On Windows the file inherits the directory's access permissions. For the
+default owner on the default queue prefix, run
 
 ```sh
-python -m lazybridge.ext.approval --db approvals.sqlite issue-approver-credential owner --role owner
+python -m lazybridge.ext.approval --db approvals.sqlite issue-approver-credential owner --role owner --output owner.credential
 ```
 
 Use `--prefix` for a custom queue prefix. From host Python, use

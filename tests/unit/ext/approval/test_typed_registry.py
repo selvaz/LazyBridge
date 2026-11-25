@@ -125,6 +125,7 @@ def test_public_identity_fields_do_not_authenticate(registry: tuple[ApprovalQueu
 
 def test_operator_cli_stores_only_the_hash_and_binds_it_to_the_queue(tmp_path: Path) -> None:
     db = str(tmp_path / "queue.sqlite")
+    output = tmp_path / "owner.credential"
     result = subprocess.run(
         [
             sys.executable,
@@ -140,12 +141,15 @@ def test_operator_cli_stores_only_the_hash_and_binds_it_to_the_queue(tmp_path: P
             "owner",
             "--role",
             "audit",
+            "--output",
+            str(output),
         ],
         capture_output=True,
         text=True,
         check=True,
     )
-    secret = result.stdout.strip()
+    assert result.stdout == result.stderr == ""
+    secret = output.read_text(encoding="ascii").strip()
     assert len(secret) == 43
     digest = hashlib.sha256(secret.encode()).hexdigest()
     with Store(db=db) as store:

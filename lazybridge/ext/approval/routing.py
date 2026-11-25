@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 if TYPE_CHECKING:
     from lazybridge.policy import ApprovalTier, PolicyContext
-
-    from .queue import ApprovalTicket
 
 DEFAULT_ACTION_TIERS: dict[str, ApprovalTier] = {
     "command": "routine",
@@ -159,6 +157,11 @@ def build_route(
     )
 
 
-def route_ticket(ticket: ApprovalTicket) -> ApprovalGrantUse | None:
+class _RoutedTicket(Protocol):
+    @property
+    def route(self) -> ApprovalRoute | None: ...
+
+
+def route_ticket(ticket: _RoutedTicket) -> ApprovalGrantUse | None:
     """Return the ticket's current assignee and its qualifying grant."""
     return ticket.route.assignee if ticket.route is not None else None

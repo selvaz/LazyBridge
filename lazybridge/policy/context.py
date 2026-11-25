@@ -11,6 +11,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import RLock
 
+from ._review_selection import ReviewIndependence, ReviewMode, ReviewSelection, select_reviewer
 from .models import EffectivePolicy, PolicyError, PolicyWidening, TaskGrant
 from .resolve import (
     _intersect_tool_policy,
@@ -20,7 +21,6 @@ from .resolve import (
     child_within_parent,
     validate_child_policy,
 )
-from .review import ReviewIndependence, ReviewMode, ReviewSelection, select_reviewer
 
 
 class PolicyBudgetExceeded(PolicyError):

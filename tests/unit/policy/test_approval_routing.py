@@ -277,7 +277,9 @@ def test_requester_label_cannot_remove_owner_fallback_or_grant_authority(
         pathless = queue.create_typed_ticket(req)
         assert assignee(ticket) == assignee(pathless) == "owner"
         assert not queue.decide_typed_ticket(ticket.approval_id, credential=invocation_credential(), verdict="approved")
-        assert not queue.decide_typed_ticket(pathless.approval_id, credential=invocation_credential(), verdict="approved")
+        assert not queue.decide_typed_ticket(
+            pathless.approval_id, credential=invocation_credential(), verdict="approved"
+        )
 
     assert {pending.approval_id for pending in queue.list_pending_tickets(assignee=OWNER)} == {
         ticket.approval_id,
@@ -377,8 +379,10 @@ def test_a8_authority_is_delegable_and_changes_only_the_policy_digest(tmp_path: 
     assert base.digest != parent.digest
     for compile_policy in (compile_claude, compile_codex):
         base_settings, parent_settings = compile_policy(base), compile_policy(parent)
-        assert base_settings.pop("policy_digest") == base.digest
-        assert parent_settings.pop("policy_digest") == parent.digest
+        base_digest = base_settings.pop("policy_digest")
+        parent_digest = parent_settings.pop("policy_digest")
+        assert base_digest == base.digest
+        assert parent_digest == parent.digest
         assert base_settings == parent_settings
     child = child_within_parent(parent, grant(tmp_path, frozenset({"run_tests"})))
     assert child.approval_authority == frozenset({"run_tests"})

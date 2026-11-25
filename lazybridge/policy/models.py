@@ -8,22 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from .cards import ApprovalCard
-
-
-class PolicyError(ValueError):
-    """Raised when a profile document or task grant is invalid."""
-
-
-class PolicyWidening(PolicyError):
-    """Raised when a delegated request exceeds its parent authority."""
-
-
-class PolicyDenied(PolicyError):
-    """Raised when code directly invokes a capability hidden by policy."""
-
-    def __init__(self, capability: str, message: str | None = None) -> None:
-        self.capability = capability
-        super().__init__(message or f"capability {capability!r} is not granted by the active policy")
+from .errors import PolicyDenied as PolicyDenied
+from .errors import PolicyError as PolicyError
+from .errors import PolicyWidening as PolicyWidening
 
 
 @dataclass(frozen=True)

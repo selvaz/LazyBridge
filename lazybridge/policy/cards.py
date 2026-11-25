@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path, PureWindowsPath
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-if TYPE_CHECKING:
-    from .models import EffectivePolicy
+from .errors import PolicyWidening
 
 ApprovalTier = Literal["routine", "sensitive", "external"]
 CardTier = Literal["routine", "sensitive"]
@@ -94,8 +93,6 @@ def _single_command(argv: tuple[str, ...]) -> bool:
 
 def validate_card_copy(parent: ApprovalCard, child: ApprovalCard) -> None:
     """Require a direct copy that narrows or retains each restriction."""
-    from .models import PolicyWidening
-
     if (
         not parent.transferable
         or child.provenance != parent.chain
@@ -152,24 +149,24 @@ def _canonical_path(path: Path, base: Path) -> Path:
 
 
 def card_action_paths(
-    action: CardAction, policy: EffectivePolicy, *, target_path: str | None = None
+    action: CardAction, *, folder: Path, tool_classes: frozenset[str], network: str, target_path: str | None = None
 ) -> tuple[Path, ...] | None:
     """Return affected canonical paths when the direct command fits the execution ceiling."""
     if (
         not _single_command(action.argv)
         or not action.paths
-        or "shell" not in policy.tool_classes
-        or (action.network == "on" and policy.network != "on")
+        or "shell" not in tool_classes
+        or (action.network == "on" and network != "on")
     ):
         return None
     try:
-        cwd = _canonical_path(action.cwd, policy.folder)
+        cwd = _canonical_path(action.cwd, folder)
         paths = tuple(_canonical_path(path, cwd) for path in action.paths)
         if target_path is not None and _canonical_path(Path(target_path), cwd) not in paths:
             return None
     except (OSError, RuntimeError, ValueError):
         return None
-    if not all(path.is_relative_to(policy.folder) for path in (cwd, *paths)):
+    if not all(path.is_relative_to(folder) for path in (cwd, *paths)):
         return None
     return paths
 

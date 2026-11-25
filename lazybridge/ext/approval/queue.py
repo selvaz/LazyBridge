@@ -791,7 +791,13 @@ class ApprovalQueue:
         ref = request.target.ref
         if ref is not None and (action.branch is None or ref not in (action.branch, f"refs/heads/{action.branch}")):
             return None
-        return card_action_paths(action, policy, target_path=request.target.path)
+        return card_action_paths(
+            action,
+            folder=policy.folder,
+            tool_classes=policy.tool_classes,
+            network=policy.network,
+            target_path=request.target.path,
+        )
 
     def _file_typed_ticket(
         self,

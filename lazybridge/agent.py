@@ -128,6 +128,14 @@ class Agent:
     _fresh_review = False  # set by policy.make_reviewer for isolated fallback reviewers
     _read_only_review = False  # set by policy.make_reviewer for all reviewers it creates
 
+    @property
+    def _policy_agent_id(self) -> str:
+        # Older instances and subclasses can enter without running Agent.__init__.
+        identity = getattr(self, "_policy_identity", None)
+        if identity is None:
+            identity = self.__dict__.setdefault("_policy_identity", uuid.uuid4().hex)
+        return identity
+
     def __init__(
         self,
         engine: str | Any | None = None,
@@ -281,7 +289,7 @@ class Agent:
 
         self._tools_raw = list(tools or [])
         self.policy = policy
-        self._policy_agent_id = uuid.uuid4().hex
+        self._policy_identity = uuid.uuid4().hex
         self.tree_budget = tree_budget
         self.reserve_review = reserve_review
         self.budget_role = budget_role
@@ -501,9 +509,10 @@ class Agent:
                 work_units=getattr(self, "work_units", 1),
                 fresh=self._fresh_review,
                 read_only_review=self._read_only_review,
-                approval_actor=self.name,
+                approval_actor=getattr(self, "name", None),
                 agent_id=self._policy_agent_id,
-                session=(_session_override.get() if self._session_inherited else None) or self.session,
+                session=(_session_override.get() if getattr(self, "_session_inherited", False) else None)
+                or getattr(self, "session", None),
             ),
             _guarded_output() if guard else nullcontext(),
         ):
@@ -863,9 +872,9 @@ class Agent:
             fresh=self._fresh_review,
             read_only_review=self._read_only_review,
             bind=False,
-            approval_actor=self.name,
+            approval_actor=getattr(self, "name", None),
             agent_id=self._policy_agent_id,
-            session=self.session,
+            session=getattr(self, "session", None),
         ) as invocation:
             gen = self._stream_scoped(task, images=images, audio=audio)
             try:
@@ -1235,7 +1244,7 @@ class Agent:
         )
         base_kwargs.update(overrides)
         derived = Agent(**base_kwargs)
-        derived._policy_agent_id = self._policy_agent_id
+        derived._policy_identity = self._policy_agent_id
         derived._read_only_review = self._read_only_review
         # __init__ stamps engine._agent_name on every construction; since the engine
         # object is shared, restore the original so base-agent runs continue to
