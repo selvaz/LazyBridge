@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from lazybridge.skill import __main__ as cli
 
 
@@ -36,7 +38,17 @@ def test_foreign_folder_is_refused_unless_forced(tmp_path, capsys):
 def test_default_targets_follow_the_assistants_found(tmp_path, monkeypatch):
     homes = {"claude": tmp_path / ".claude", "codex": tmp_path / ".codex"}
     homes["codex"].mkdir()
-    monkeypatch.setattr(cli, "HOMES", homes)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     assert cli.main(["install"]) == 0
     assert (homes["codex"] / "skills" / "lazybridge" / "SKILL.md").is_file()
     assert not homes["claude"].exists()
+
+
+def test_explicit_destination_works_without_a_home(tmp_path, monkeypatch, capsys):
+    def missing_home():
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", missing_home)
+    assert cli.main(["install", "--dest", str(tmp_path / "lazybridge")]) == 0
+    assert cli.main(["install"]) == 1
+    assert "Specify --dest" in capsys.readouterr().err

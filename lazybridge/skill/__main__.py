@@ -18,8 +18,7 @@ from pathlib import Path
 
 from lazybridge.skill import MARKER, install_skill
 
-HOMES = {"claude": Path.home() / ".claude", "codex": Path.home() / ".codex"}
-__all__ = ["HOMES", "MARKER", "main"]
+__all__ = ["MARKER", "main"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,10 +33,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.dest:
         targets = [args.dest]
     else:
+        try:
+            home = Path.home()
+        except RuntimeError:
+            print("refused: could not determine the home directory. Specify --dest.", file=sys.stderr)
+            return 1
+        homes = {"claude": home / ".claude", "codex": home / ".codex"}
         names = (
-            list(HOMES) if args.to == "all" else [args.to] if args.to else [n for n, h in HOMES.items() if h.is_dir()]
+            list(homes) if args.to == "all" else [args.to] if args.to else [n for n, h in homes.items() if h.is_dir()]
         )
-        targets = [HOMES[n] / "skills" / "lazybridge" for n in names or ["claude"]]
+        targets = [homes[n] / "skills" / "lazybridge" for n in names or ["claude"]]
     try:
         for dest in targets:
             print(f"installed {install_skill(dest, force=args.force)}")

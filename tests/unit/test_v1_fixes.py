@@ -62,6 +62,15 @@ def _make_agent(response: str = "hello", *, name: str = "agent") -> Agent:
 
 
 class TestAsToolMethod:
+    def test_agents_created_without_init_have_distinct_stable_policy_ids(self):
+        first = _make_agent(name="shared")
+        second = _make_agent(name="shared")
+
+        identity = first._policy_agent_id
+        assert identity
+        assert first._policy_agent_id == identity
+        assert second._policy_agent_id != identity
+
     def test_returns_tool(self):
         a = _make_agent("result")
         t = a.as_tool()

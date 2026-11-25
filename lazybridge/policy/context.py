@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from collections import Counter
 from collections.abc import Collection, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import RLock
 
-from .models import EffectivePolicy, PolicyError, TaskGrant
-from .resolve import _read_only_review_policy, child_within_parent, validate_child_policy
-from .review import ReviewIndependence, ReviewMode, ReviewSelection, select_reviewer
+from ._review_selection import ReviewIndependence, ReviewMode, ReviewSelection, select_reviewer
+from .models import EffectivePolicy, PolicyError, PolicyWidening, TaskGrant
+from .resolve import (
+    _intersect_tool_policy,
+    _read_only_review_policy,
+    _with_policy_digest,
+    _without_approvals,
+    child_within_parent,
+    validate_child_policy,
+)
 
 
 class PolicyBudgetExceeded(PolicyError):
@@ -28,6 +36,11 @@ class PolicyBudgetExceeded(PolicyError):
 class _ReviewReservation:
     writer_engine: str
     selection: ReviewSelection
+    agent_id: str | None
+    session: object | None
+
+    def shares_identity(self, agent_id: str | None, session: object | None) -> bool:
+        return (agent_id is not None and agent_id == self.agent_id) or (session is not None and session is self.session)
 
 
 @dataclass
@@ -68,6 +81,8 @@ class TreeBudget:
         role: str | None = None,
         engine: str | None = None,
         fresh: bool = False,
+        agent_id: str | None = None,
+        session: object | None = None,
     ) -> ReviewIndependence | None:
         """Admit a child and return the independence of any claimed review slot.
 
@@ -93,7 +108,7 @@ class TreeBudget:
             if reserve_review and child_id not in self._review_reservations:
                 assert engine is not None
                 selection = select_reviewer(engine, self.available_engines, self.review_mode)
-                new_reservation = _ReviewReservation(engine, selection)
+                new_reservation = _ReviewReservation(engine, selection, agent_id, session)
             if role == "reviewer" and becomes_active:
                 claim = next(
                     (
@@ -101,10 +116,16 @@ class TreeBudget:
                         for writer, pending in self._review_reservations.items()
                         if pending.selection.engine == engine
                         and writer != child_id
+                        and not pending.shares_identity(agent_id, session)
                         and (pending.selection.independence == "opposite-engine" or (fresh is True and is_new))
                     ),
                     None,
                 )
+                if claim is None and any(
+                    writer == child_id or pending.shares_identity(agent_id, session)
+                    for writer, pending in self._review_reservations.items()
+                ):
+                    raise PolicyError("reviewer must use a different agent and session from the writer")
             if active_limit is not None and (becomes_active or new_reservation):
                 occupied = len(self._active) + len(self._review_reservations) + int(new_reservation is not None)
                 if claim is not None:
@@ -140,8 +161,14 @@ class TreeBudget:
                 del self._active[child_id]
 
 
+class _InvocationCredential:
+    # Keep the secret out of dataclass fields and public invocation snapshots.
+    __slots__ = ("_approval_credential",)
+    _approval_credential: str | None
+
+
 @dataclass(frozen=True)
-class PolicyContext:
+class PolicyContext(_InvocationCredential):
     """Authority carried by one invocation into all nested work."""
 
     effective_policy: EffectivePolicy | None
@@ -151,15 +178,45 @@ class PolicyContext:
     tree_budget: TreeBudget | None = None
     depth: int = 0
     review_independence: ReviewIndependence | None = None
+    parent: PolicyContext | None = field(default=None, repr=False, compare=False)
+    approval_actor: str | None = None
+    agent_id: str | None = None
+
+    @property
+    def actor(self) -> str:
+        """Display identity for request metadata and audit records."""
+        return self.approval_actor or self.invocation_id
 
 
 _current: ContextVar[PolicyContext | None] = ContextVar("lazybridge_policy_context", default=None)
+_in_invocation: ContextVar[bool] = ContextVar("lazybridge_in_invocation", default=False)
+_delegated_agent: ContextVar[object | None] = ContextVar("lazybridge_delegated_agent", default=None)
 
 
 def current_policy_context() -> PolicyContext | None:
     """Return the active invocation policy, if policy enforcement is enabled."""
 
     return _current.get()
+
+
+def current_approver_credential() -> str | None:
+    """Return only the active invocation's credential for a registry call."""
+    context = _current.get()
+    return getattr(context, "_approval_credential", None)
+
+
+def _require_operator_context() -> None:
+    if _in_invocation.get():
+        raise PermissionError("operation requires the host outside an agent invocation")
+
+
+@contextmanager
+def _agent_tool_call(agent: object) -> Iterator[None]:
+    token = _delegated_agent.set(agent)
+    try:
+        yield
+    finally:
+        _delegated_agent.reset(token)
 
 
 def review_engine(engine: object) -> str | None:
@@ -176,12 +233,22 @@ def review_engine(engine: object) -> str | None:
 
 def resolve_invocation_policy(
     configured: EffectivePolicy | TaskGrant | None,
+    *,
+    tool_call: bool = False,
 ) -> tuple[EffectivePolicy | None, PolicyContext | None]:
     """Resolve an agent's configured authority against the immediate caller."""
 
     parent = _current.get()
     if configured is None:
-        return (parent.effective_policy, parent) if parent is not None else (None, None)
+        inherited = parent.effective_policy if parent is not None else None
+        return (_without_approvals(inherited) if inherited is not None else None), parent
+    if (
+        tool_call
+        and parent is not None
+        and parent.delegable_grants is not None
+        and isinstance(configured, (EffectivePolicy, TaskGrant))
+    ):
+        return _intersect_tool_policy(parent.delegable_grants, configured), parent
     if isinstance(configured, TaskGrant):
         if parent is None or parent.delegable_grants is None:
             raise PolicyError("a TaskGrant requires a parent policy context")
@@ -190,6 +257,10 @@ def resolve_invocation_policy(
         effective = configured
         if parent is not None and parent.delegable_grants is not None:
             validate_child_policy(parent.delegable_grants, effective)
+        if effective.approval_authority or effective.approval_cards:
+            if parent is not None and parent.delegable_grants is None:
+                raise PolicyWidening("approval authority requires a parent grant")
+            effective = _with_policy_digest(effective)
     else:
         raise TypeError("policy must be an EffectivePolicy, TaskGrant, or None")
     return effective, parent
@@ -208,18 +279,58 @@ def policy_scope(
     engine: str | None = None,
     fresh: bool = False,
     read_only_review: bool = False,
+    approval_actor: str | None = None,
 ) -> Iterator[PolicyContext | None]:
-    """Bind policy authority for exactly one agent invocation."""
+    """Bind policy authority for one invocation, with an optional display label."""
 
-    effective, parent = resolve_invocation_policy(configured)
+    with _policy_scope(
+        configured,
+        tree_budget=tree_budget,
+        child_id=child_id,
+        reserve_review=reserve_review,
+        work_units=work_units,
+        bind=bind,
+        role=role,
+        engine=engine,
+        fresh=fresh,
+        read_only_review=read_only_review,
+        approval_actor=approval_actor,
+    ) as context:
+        yield context
+
+
+@contextmanager
+def _policy_scope(
+    configured: EffectivePolicy | TaskGrant | None,
+    *,
+    tree_budget: TreeBudget | None = None,
+    child_id: object | None = None,
+    reserve_review: bool = False,
+    work_units: int = 1,
+    bind: bool = True,
+    role: str | None = None,
+    engine: str | None = None,
+    fresh: bool = False,
+    read_only_review: bool = False,
+    approval_actor: str | None = None,
+    agent_id: str | None = None,
+    session: object | None = None,
+) -> Iterator[PolicyContext | None]:
+    if approval_actor is not None and not approval_actor.strip():
+        raise PolicyError("approval actor must be nonblank")
+    tool_call = child_id is not None and _delegated_agent.get() is child_id
+    effective, parent = resolve_invocation_policy(configured, tool_call=tool_call)
     if read_only_review and effective is not None:
         effective = _read_only_review_policy(effective)
     budget = parent.tree_budget if parent is not None else tree_budget
     if effective is None and budget is None:
-        yield None
+        with _bind_policy_context(None) if bind else nullcontext():
+            yield None
         return
     depth = parent.depth + 1 if parent is not None else 0
-    admitted_id = child_id if parent is not None and budget is not None else None
+    invocation_id = uuid.uuid4().hex
+    # Pool/tool calls are new work. Direct calls retain their resumable slot.
+    admitted_id = (invocation_id if tool_call else child_id) if parent and budget else None
     independence = None
     if admitted_id is not None and budget is not None:
         independence = budget.admit(
@@ -230,31 +341,40 @@ def policy_scope(
             role=role,
             engine=engine,
             fresh=fresh,
+            agent_id=agent_id,
+            session=session,
         )
     context = PolicyContext(
         effective_policy=effective,
         delegable_grants=effective,
-        invocation_id=uuid.uuid4().hex,
+        invocation_id=invocation_id,
         parent_invocation_id=parent.invocation_id if parent is not None else None,
         tree_budget=budget,
         depth=depth,
         review_independence=independence,
+        parent=parent,
+        approval_actor=approval_actor,
+        agent_id=agent_id or (parent.agent_id if parent is not None else None) or invocation_id,
     )
-    token = _current.set(context) if bind else None
+    object.__setattr__(context, "_approval_credential", secrets.token_urlsafe(32))
     try:
-        yield context
+        with _bind_policy_context(context) if bind else nullcontext():
+            yield context
     finally:
-        if token is not None:
-            _current.reset(token)
+        object.__setattr__(context, "_approval_credential", None)
         if admitted_id is not None and budget is not None:
             budget.release(admitted_id)
 
 
 @contextmanager
-def bind_policy_context(context: PolicyContext | None) -> Iterator[None]:
+def _bind_policy_context(context: PolicyContext | None) -> Iterator[None]:
     """Temporarily restore an existing invocation context around a resume."""
     token = _current.set(context)
+    active = _in_invocation.set(True)
+    delegated = _delegated_agent.set(None)
     try:
         yield
     finally:
+        _delegated_agent.reset(delegated)
         _current.reset(token)
+        _in_invocation.reset(active)

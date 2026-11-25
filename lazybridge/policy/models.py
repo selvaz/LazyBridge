@@ -7,21 +7,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .cards import ApprovalCard
+from .errors import PolicyDenied, PolicyError, PolicyWidening
 
-class PolicyError(ValueError):
-    """Raised when a profile document or task grant is invalid."""
-
-
-class PolicyWidening(PolicyError):
-    """Raised when a delegated request exceeds its parent authority."""
-
-
-class PolicyDenied(PolicyError):
-    """Raised when code directly invokes a capability hidden by policy."""
-
-    def __init__(self, capability: str, message: str | None = None) -> None:
-        self.capability = capability
-        super().__init__(message or f"capability {capability!r} is not granted by the active policy")
+__all__ = [
+    "EffectivePolicy",
+    "PolicyDenied",
+    "PolicyError",
+    "PolicyWidening",
+    "Profile",
+    "ProfileDocument",
+    "TaskGrant",
+]
 
 
 @dataclass(frozen=True)
@@ -43,6 +40,8 @@ class TaskGrant:
     grants: Mapping[str, Any]
     network: str
     placement: str
+    approval_authority: frozenset[str] = frozenset()
+    approval_cards: tuple[ApprovalCard, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -65,3 +64,5 @@ class EffectivePolicy:
     digest: str
     removed_grants: tuple[tuple[str, str], ...] = field(default=(), compare=False)
     _document: ProfileDocument | None = field(default=None, compare=False, repr=False)
+    approval_authority: frozenset[str] = frozenset()
+    approval_cards: tuple[ApprovalCard, ...] = ()

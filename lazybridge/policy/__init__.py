@@ -1,7 +1,15 @@
 """Engine-neutral execution and delegation policies."""
 
+from .cards import ApprovalCard, ApprovalTier, CardAction, CardMatcher, CardTier
 from .compile import compile_claude, compile_codex
-from .context import PolicyBudgetExceeded, PolicyContext, TreeBudget, current_policy_context, policy_scope
+from .context import (
+    PolicyBudgetExceeded,
+    PolicyContext,
+    TreeBudget,
+    current_approver_credential,
+    current_policy_context,
+    policy_scope,
+)
 from .models import EffectivePolicy, PolicyDenied, PolicyError, PolicyWidening, Profile, ProfileDocument, TaskGrant
 from .resolve import child_within_parent, load_profiles, resolve
 from .review import (
@@ -14,6 +22,11 @@ from .review import (
 )
 
 __all__ = [
+    "ApprovalCard",
+    "ApprovalTier",
+    "CardAction",
+    "CardMatcher",
+    "CardTier",
     "EffectivePolicy",
     "PolicyError",
     "PolicyBudgetExceeded",
@@ -30,6 +43,7 @@ __all__ = [
     "child_within_parent",
     "compile_claude",
     "compile_codex",
+    "current_approver_credential",
     "current_policy_context",
     "load_profiles",
     "make_reviewer",

@@ -61,14 +61,44 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 import re
+import secrets
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+from lazybridge.policy import (
+    ApprovalCard,
+    ApprovalTier,
+    CardAction,
+    CardMatcher,
+    CardTier,
+    PolicyContext,
+    PolicyWidening,
+    current_approver_credential,
+    current_policy_context,
+)
+from lazybridge.policy.cards import card_action_paths
+from lazybridge.policy.context import _require_operator_context
+
+from .cards import CardApproval, CardProposal, CardTemplate, _CardRegistry
+from .routing import (
+    DEFAULT_ACTION_TIERS,
+    ApprovalGrantUse,
+    ApprovalHop,
+    ApprovalRoute,
+    ApproverContext,
+    EscalationSummary,
+    build_route,
+    invocation_chain,
+    route_ticket,
+)
 
 if TYPE_CHECKING:
     from lazybridge import Store
@@ -93,8 +123,8 @@ _FEEDBACK_PRIORITY: dict[FeedbackPriority, int] = {"urgent": 0, "high": 1, "norm
 _FeedbackOption = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 
 
-def _canonical_digest(request: BaseModel) -> str:
-    body = request.model_dump(mode="json", exclude={"digest"})
+def _canonical_digest(request: BaseModel, *, exclude: set[str] | None = None) -> str:
+    body = request.model_dump(mode="json", exclude={"digest", *(exclude or ())})
     encoded = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(encoded.encode()).hexdigest()
 
@@ -108,8 +138,20 @@ class ApprovalTarget(BaseModel):
     path: str | None = None
 
 
+class ServiceCall(BaseModel):
+    """The configured service and exact input bound to an approval."""
+
+    model_config = ConfigDict(frozen=True)
+
+    agent: str
+    policy_digest: str
+    task_digest: str
+
+
 class TypedApprovalRequest(BaseModel):
     """Canonical, task-bound request used for governed effects."""
+
+    model_config = ConfigDict(revalidate_instances="always")
 
     task_id: str
     attempt: int
@@ -119,6 +161,10 @@ class TypedApprovalRequest(BaseModel):
     policy_revision: str
     payload: dict[str, Any] = Field(default_factory=dict)
     digest: str
+    tier: ApprovalTier | None = None
+    action_class: str | None = Field(default=None, min_length=1)
+    card_action: CardAction | None = None
+    service_call: ServiceCall | None = None
 
     @classmethod
     def create(cls, **values: Any) -> TypedApprovalRequest:
@@ -127,7 +173,10 @@ class TypedApprovalRequest(BaseModel):
         return provisional.model_copy(update={"digest": provisional.canonical_digest()})
 
     def canonical_digest(self) -> str:
-        return _canonical_digest(self)
+        optional = {
+            name for name in ("tier", "action_class", "card_action", "service_call") if getattr(self, name) is None
+        }
+        return _canonical_digest(self, exclude=optional)
 
 
 class FeedbackRequest(BaseModel):
@@ -175,6 +224,7 @@ class ApprovalDecision(BaseModel):
     decided_at: datetime
     verdict: ApprovalVerdict
     reason: str | None = None
+    grant: ApprovalGrantUse | None = None
 
 
 class ApprovalEffectOutcome(BaseModel):
@@ -182,13 +232,6 @@ class ApprovalEffectOutcome(BaseModel):
     recorded_at: datetime
     succeeded: bool
     detail: str | None = None
-
-
-class ApproverContext(BaseModel):
-    """Identity and optional role authenticated by the approval transport."""
-
-    actor: str
-    role: str | None = None
 
 
 class RequestExecutorContext(BaseModel):
@@ -307,6 +350,15 @@ class ApprovalTicket(BaseModel):
     decision: ApprovalDecision | None = None
     effect_outcome: ApprovalEffectOutcome | None = None
     feedback_request: FeedbackRequest | None = None
+    tier: ApprovalTier | None = None
+    action_class: str | None = None
+    requester_path: tuple[str, ...] = ()
+    requester_agent_id: str | None = None
+    route: ApprovalRoute | None = None
+    card_proposal: CardProposal | None = None
+    proposal_fingerprint: str | None = None
+    proposal_parent: str | None = None
+    proposal_parent_invocation_id: str | None = None
 
     @property
     def legacy(self) -> bool:
@@ -601,6 +653,10 @@ class ApprovalQueue:
     per prefix a caller needs; the object itself holds no connection of its
     own beyond the ``Store`` it's given, so constructing one is cheap.
 
+    Typed decisions and manual escalation require an approver credential.
+    Only a host queue explicitly enabled for provisioning can issue operator
+    credentials. Give agents a separate queue with the default configuration.
+
     ``prefix`` matching is a literal string prefix (same semantics as
     :meth:`Store.items`'s own ``prefix=``), NOT a namespace boundary: a
     queue whose prefix is itself a prefix of another queue's prefix (e.g.
@@ -628,16 +684,36 @@ class ApprovalQueue:
         denial_prefix: str = DEFAULT_DENIAL_PREFIX,
         notify_failure_prefix: str = DEFAULT_NOTIFY_FAILURE_PREFIX,
         clock: Callable[[], datetime] | None = None,
+        allow_credential_issuance: bool = False,
+        owner_actor: str = "owner",
+        # Accepted for compatibility while independent approval is disabled.
+        independent_approvers: Mapping[str, str] | None = None,
+        action_tiers: Mapping[str, ApprovalTier] | None = None,
+        escalation_timeout: timedelta = DEFAULT_RENOTIFY_INTERVAL,
     ) -> None:
         self._store = store
         self._prefix = prefix
         self._denial_prefix = denial_prefix
         self._notify_failure_prefix = notify_failure_prefix
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._allow_credential_issuance = allow_credential_issuance
+        self._credential_prefix = f"approval-credentials:{prefix.encode().hex()}:"
+        if not owner_actor.strip() or escalation_timeout <= timedelta(0):
+            raise ValueError("routing requires an owner and a positive escalation timeout")
+        self._owner = owner_actor
+        self._action_tiers = dict(DEFAULT_ACTION_TIERS)
+        for action_class, tier in (action_tiers or {}).items():
+            if not action_class.strip() or tier not in ("routine", "sensitive", "external"):
+                raise ValueError("invalid action class or tier")
+            if not self._tier_at_least(tier, DEFAULT_ACTION_TIERS.get(action_class, "routine")):
+                raise ValueError("built-in action tiers cannot be lowered")
+            self._action_tiers[action_class] = tier
+        self._escalation_timeout = escalation_timeout
         # Resolved ONCE, here -- see _anchor_db_path's own docstring for
         # why re-resolving per-call/per-thread is unsafe. Every operation
         # below (reads AND writes) routes through this same anchor.
         self._resolved_db_path = _anchor_db_path(store)
+        self._cards = _CardRegistry(self._anchored, f"approval-cards:{prefix}", self._now)
 
     def _now(self) -> datetime:
         now = self._clock()
@@ -653,6 +729,7 @@ class ApprovalQueue:
         kind: TicketKind = "approval",
         ttl: timedelta = DEFAULT_TTL,
         operator_only: bool = False,
+        requester: PolicyContext | None = None,
     ) -> ApprovalTicket:
         """Create a governed ticket after verifying its canonical digest.
 
@@ -660,6 +737,27 @@ class ApprovalQueue:
         payload is redacted before persistence; the digest continues to bind
         the original request supplied by the caller.
         """
+        request = self._validate_typed_request(request, ttl=ttl, requester=requester)
+        if request.service_call is not None:
+            raise ValueError("file service requests through the configured service agent")
+        return self._file_typed_ticket(
+            request,
+            prompt=prompt,
+            kind=kind,
+            ttl=ttl,
+            operator_only=operator_only,
+            requester=requester,
+            paths=self._card_paths(request, requester) if requester is not None else None,
+        )
+
+    @staticmethod
+    def _tier_at_least(tier: ApprovalTier, minimum: ApprovalTier) -> bool:
+        tiers = ("routine", "sensitive", "external")
+        return tiers.index(tier) >= tiers.index(minimum)
+
+    def _validate_typed_request(
+        self, request: TypedApprovalRequest, *, ttl: timedelta, requester: PolicyContext | None
+    ) -> TypedApprovalRequest:
         request = TypedApprovalRequest.model_validate(request)
         if request.attempt < 1:
             raise ValueError("attempt must be positive")
@@ -667,7 +765,80 @@ class ApprovalQueue:
             raise ValueError("request digest does not match canonical request")
         if ttl <= timedelta(0):
             raise ValueError(f"ttl must be positive, got {ttl}")
+        if requester is not None and requester is not current_policy_context():
+            raise ValueError("requester must be the active invocation")
+        if (
+            requester is not None
+            or request.tier is not None
+            or request.action_class is not None
+            or request.card_action is not None
+        ) and (
+            not request.action.strip()
+            or request.tier is None
+            or request.action_class is None
+            or not self._tier_at_least(request.tier, self._action_tiers.get(request.action_class, "external"))
+        ):
+            raise ValueError("action class and tier must agree with the routing policy")
+        if requester is None and request.card_action is not None:
+            raise ValueError("card requests require an active invocation")
+        return request
+
+    @staticmethod
+    def _card_paths(request: TypedApprovalRequest, requester: PolicyContext) -> tuple[Path, ...] | None:
+        action, policy = request.card_action, requester.effective_policy
+        if action is None or policy is None:
+            return None
+        ref = request.target.ref
+        if ref is not None and (action.branch is None or ref not in (action.branch, f"refs/heads/{action.branch}")):
+            return None
+        return card_action_paths(
+            action,
+            folder=policy.folder,
+            tool_classes=policy.tool_classes,
+            network=policy.network,
+            target_path=request.target.path,
+        )
+
+    def _file_typed_ticket(
+        self,
+        request: TypedApprovalRequest,
+        *,
+        prompt: str,
+        kind: TicketKind,
+        ttl: timedelta,
+        operator_only: bool,
+        requester: PolicyContext | None,
+        paths: tuple[Path, ...] | None,
+    ) -> ApprovalTicket:
         now = self._now()
+        chain = invocation_chain(requester) if requester is not None else ()
+        route = build_route(
+            chain,
+            tier=request.tier or "external",
+            action_class=request.action_class or "unclassified",
+            owner=self._owner,
+            operator_only=operator_only,
+            now=now,
+            timeout=self._escalation_timeout,
+        )
+        proposal = None
+        if request.tier is not None and request.action_class is not None:
+            action = request.card_action
+            if len(chain) > 1 and not operator_only and request.tier != "external" and action is not None and paths:
+                proposal = CardProposal(
+                    action_class=request.action_class,
+                    tier=request.tier,
+                    matcher=CardMatcher(
+                        command=action.argv,
+                        arguments=(),
+                        branch=action.branch,
+                        path_prefix=Path(os.path.commonpath(paths)),
+                        network=action.network,
+                    ),
+                    task_id=request.task_id,
+                    requester=request.requested_by,
+                    project_id=action.project_id,
+                )
         stored_request = request.model_copy(update={"payload": redact_approval_payload(request.payload)})
         ticket = ApprovalTicket(
             approval_id=str(uuid.uuid4()),
@@ -680,8 +851,222 @@ class ApprovalQueue:
             created_at=now,
             expires_at=now + ttl,
             request=stored_request,
+            tier=request.tier,
+            action_class=request.action_class,
+            requester_path=tuple(context.invocation_id for context in chain),
+            requester_agent_id=requester.agent_id if requester is not None else None,
+            route=route,
+            card_proposal=proposal,
+            proposal_fingerprint=_canonical_digest(request, exclude={"attempt", "requested_by"}) if proposal else None,
+            proposal_parent=chain[-2].actor if proposal else None,
+            proposal_parent_invocation_id=chain[-2].invocation_id if proposal else None,
         )
         return self._write_ticket(ticket)
+
+    def submit_typed_request(
+        self,
+        request: TypedApprovalRequest,
+        *,
+        requester: PolicyContext,
+        prompt: str = "",
+        ttl: timedelta = DEFAULT_TTL,
+        operator_only: bool = False,
+    ) -> CardApproval | ApprovalTicket:
+        """Spend a matching card and record its use, or file a routed ticket."""
+        request = self._validate_typed_request(request, ttl=ttl, requester=requester)
+        if request.service_call is not None:
+            raise ValueError("file service requests through the configured service agent")
+        paths = self._card_paths(request, requester)
+        if not operator_only and paths and request.card_action and request.action_class and request.tier:
+            approved = self._cards.approve(
+                requester,
+                request.card_action,
+                paths,
+                action_name=request.action,
+                action_class=request.action_class,
+                tier=request.tier,
+                task_id=request.task_id,
+                request_digest=request.digest,
+            )
+            if approved is not None:
+                return approved
+        return self._file_typed_ticket(
+            request,
+            prompt=prompt,
+            kind="approval",
+            ttl=ttl,
+            operator_only=operator_only,
+            requester=requester,
+            paths=paths,
+        )
+
+    def _is_owner(self, approver: ApproverContext) -> bool:
+        return (
+            approver.invocation_id is None
+            and approver.actor == self._owner
+            and (approver.role == "owner" or "owner" in approver.roles)
+        )
+
+    def issue_approver_credential(self, principal: str, roles: Collection[str]) -> str:
+        """Provision a bearer secret once through the host's operator queue."""
+        _require_operator_context()
+        if not self._allow_credential_issuance:
+            raise PermissionError("credential issuance is disabled for this queue")
+        if not principal.strip() or isinstance(roles, str) or any(not role.strip() for role in roles):
+            raise ValueError("a credential requires a nonblank principal and nonblank role names")
+        record = {"principal": principal, "roles": sorted(set(roles))}
+        with self._anchored() as anchored:
+            while True:
+                secret = secrets.token_urlsafe(32)
+                if anchored.compare_and_swap(self._credential_prefix + _hash_prompt(secret), None, record):
+                    return secret
+
+    def _authenticated_approver(self, credential: str) -> ApproverContext | None:
+        if not isinstance(credential, str) or len(credential) != 43 or not credential.isascii():
+            return None
+        context = current_policy_context()
+        active_credential = current_approver_credential()
+        if (
+            context is not None
+            and active_credential is not None
+            and secrets.compare_digest(credential, active_credential)
+        ):
+            return ApproverContext.from_invocation(context)
+        with self._anchored() as anchored:
+            record = anchored.read(self._credential_prefix + _hash_prompt(credential))
+        if record is None:
+            return None
+        return ApproverContext(actor=record["principal"], roles=record["roles"])
+
+    def _require_owner(self, credential: str) -> None:
+        principal = self._authenticated_approver(credential)
+        if principal is None or not self._is_owner(principal):
+            raise PermissionError("operation requires an owner credential")
+
+    def _can_act(self, approver: ApproverContext, grant: ApprovalGrantUse | None) -> bool:
+        if grant is None:
+            return False
+        if grant.source == "owner":
+            return grant.actor == self._owner and self._is_owner(approver)
+        return (
+            grant.source == "policy"
+            and grant.invocation_id is not None
+            and grant.policy_digest is not None
+            and approver.invocation_id == grant.invocation_id
+            and approver.policy_digest == grant.policy_digest
+            and (grant.agent_id is None or approver.agent_id == grant.agent_id)
+        )
+
+    def issue_card(
+        self,
+        *,
+        credential: str,
+        action_class: str,
+        tier: CardTier,
+        matcher: CardMatcher,
+        expires_at: datetime | None = None,
+        max_uses: int | None = None,
+        task_id: str | None = None,
+        project_id: str | None = None,
+        transferable: bool = False,
+    ) -> ApprovalCard:
+        """Register an original card issued by the authenticated owner."""
+        self._require_owner(credential)
+        if not self._tier_at_least(tier, self._action_tiers.get(action_class, "external")):
+            raise ValueError("card tier is below the action class")
+        return self._cards.issue(
+            ApprovalCard(
+                card_id=uuid.uuid4().hex,
+                action_class=action_class,
+                tier=tier,
+                matcher=self._canonical_matcher(matcher),
+                expires_at=expires_at,
+                max_uses=max_uses,
+                task_id=task_id,
+                project_id=project_id,
+                transferable=transferable,
+            )
+        )
+
+    @staticmethod
+    def _canonical_matcher(matcher: CardMatcher) -> CardMatcher:
+        matcher = CardMatcher.model_validate(matcher)
+        if matcher.path_prefix is not None:
+            return matcher.model_copy(update={"path_prefix": matcher.path_prefix.resolve()})
+        return matcher
+
+    def copy_card(
+        self,
+        card_id: str,
+        *,
+        holder: PolicyContext,
+        matcher: CardMatcher | None = None,
+        expires_at: datetime | None = None,
+        max_uses: int | None = None,
+        task_id: str | None = None,
+        project_id: str | None = None,
+        transferable: bool = False,
+    ) -> ApprovalCard:
+        """Create a copy for a child with the supplied restrictions added or tightened."""
+        policy = holder.effective_policy
+        source = next((card for card in policy.approval_cards if card.card_id == card_id), None) if policy else None
+        if source is None:
+            raise PolicyWidening("parent does not hold the source approval card")
+        child = ApprovalCard(
+            card_id=uuid.uuid4().hex,
+            action_class=source.action_class,
+            tier=source.tier,
+            matcher=self._canonical_matcher(matcher) if matcher is not None else source.matcher,
+            expires_at=expires_at if expires_at is not None else source.expires_at,
+            max_uses=max_uses if max_uses is not None else source.max_uses,
+            task_id=task_id if task_id is not None else source.task_id,
+            project_id=project_id if project_id is not None else source.project_id,
+            transferable=transferable,
+            provenance=source.chain,
+        )
+        return self._cards.copy(source, child)
+
+    def revoke_card(self, card_id: str, *, credential: str) -> bool:
+        """Revoke a card and, through its provenance, every downstream copy."""
+        self._require_owner(credential)
+        return self._cards.revoke(card_id)
+
+    def set_card_template(self, name: CardTemplate, card_ids: tuple[str, ...], *, credential: str) -> None:
+        """Set the original cards selected for a coder, reviewer or researcher hand."""
+        self._require_owner(credential)
+        if name not in ("coder", "reviewer", "researcher"):
+            raise ValueError("unknown approval card template")
+        self._cards.set_template(name, card_ids)
+
+    def copy_card_template(self, name: CardTemplate, *, holder: PolicyContext) -> tuple[ApprovalCard, ...]:
+        """Copy template cards from the parent's current hand for one child."""
+        policy = holder.effective_policy
+        return self._cards.copy_template(name, policy.approval_cards) if policy else ()
+
+    def list_card_approvals(self) -> list[CardApproval]:
+        """Read the durable record of actions approved by cards."""
+        return self._cards.approvals()
+
+    def list_card_proposals(self, *, parent: ApproverContext) -> list[CardProposal]:
+        """Return card proposals after three identical requests to this parent."""
+        if parent.invocation_id is None:
+            return []
+        with self._anchored() as anchored:
+            items = anchored.items(prefix=self._prefix)
+        repeats: dict[tuple[str | None, str], CardProposal] = {}
+        for _, raw in items:
+            if not isinstance(raw, dict) or raw.get("proposal_parent_invocation_id") != parent.invocation_id:
+                continue
+            ticket = ApprovalTicket.model_validate(raw)
+            proposal, fingerprint = ticket.card_proposal, ticket.proposal_fingerprint
+            if proposal is None or fingerprint is None:
+                continue
+            key = (ticket.requester_agent_id, fingerprint)
+            prior = repeats.get(key)
+            repeats[key] = (
+                proposal if prior is None else proposal.model_copy(update={"occurrences": prior.occurrences + 1})
+            )
+        return [proposal for proposal in repeats.values() if proposal.occurrences >= 3]
 
     def create_feedback_ticket(self, request: FeedbackRequest, *, ttl: timedelta = DEFAULT_TTL) -> ApprovalTicket:
         """File a structured escalation with its original digest and redacted payload."""
@@ -758,37 +1143,136 @@ class ApprovalQueue:
         self,
         approval_id: str,
         *,
-        approver: ApproverContext,
+        credential: str,
         verdict: ApprovalVerdict,
-        actor: str | None = None,
         reason: str | None = None,
     ) -> bool:
-        """Atomically decide a typed ticket once using authenticated identity."""
-        approver = ApproverContext.model_validate(approver)
-        if actor is not None and actor != approver.actor:
+        """Decide a typed ticket as the principal bound to the credential."""
+        principal = self._authenticated_approver(credential)
+        if principal is None:
             return False
         key = self._key(approval_id)
         with self._anchored() as anchored:
-            raw = anchored.read(key)
-            if not isinstance(raw, dict):
+            current = self._read_current_ticket(anchored, key)
+            if current is None:
                 return False
-            ticket = ApprovalTicket.model_validate(raw)
+            raw, ticket = current
             now = self._now()
-            if (
-                ticket.request is None
-                or ticket.status != "pending"
-                or ticket.decision is not None
-                or ticket.expires_at <= now
-            ):
+            if ticket.status != "pending" or ticket.decision is not None or ticket.expires_at <= now:
                 return False
-            decision = ApprovalDecision(decider=approver.actor, decided_at=now, verdict=verdict, reason=reason)
+            grant = route_ticket(ticket)
+            if not self._has_ticket_authority(ticket, principal, grant):
+                return False
+            decision = ApprovalDecision(
+                decider=principal.actor, decided_at=now, verdict=verdict, reason=reason, grant=grant
+            )
             updated = ticket.model_copy(
-                update={"status": verdict, "actor": approver.actor, "reason": reason, "decision": decision}
+                update={"status": verdict, "actor": principal.actor, "reason": reason, "decision": decision}
             )
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
 
+    def _has_ticket_authority(
+        self, ticket: ApprovalTicket, approver: ApproverContext, grant: ApprovalGrantUse | None
+    ) -> bool:
+        request = ticket.request
+        if request is None:
+            return False
+        if ticket.requester_agent_id is not None and approver.agent_id == ticket.requester_agent_id:
+            return False
+        if not ticket.requester_path:
+            # Historical, unclassified requests have no explicit owner hop.
+            return self._is_owner(approver) and (
+                (ticket.route is None and request.tier is None)
+                or (grant is not None and grant.source == "owner" and self._can_act(approver, grant))
+            )
+        if (
+            request.tier is None
+            or grant is None
+            or grant.action_class != request.action_class
+            or approver.invocation_id == ticket.requester_path[-1]
+            or not self._can_act(approver, grant)
+        ):
+            return False
+        if grant.source == "owner":
+            return True
+        if ticket.operator_only or request.tier == "external":
+            return False
+        eligible = ticket.requester_path[: -2 if request.tier == "sensitive" else -1]
+        return grant.source == "policy" and grant.invocation_id in eligible
+
+    def escalate(self, approval_id: str, summary: EscalationSummary, *, credential: str) -> bool:
+        """Forward a pending ticket as its authenticated current assignee."""
+        principal = self._authenticated_approver(credential)
+        if principal is None:
+            return False
+        summary = EscalationSummary.model_validate(summary)
+        key = self._key(approval_id)
+        with self._anchored() as anchored:
+            current = self._read_current_ticket(anchored, key)
+            if current is None:
+                return False
+            raw, ticket = current
+            route = ticket.route
+            now = self._now()
+            if (
+                ticket.status != "pending"
+                or ticket.expires_at <= now
+                or route is None
+                or not route.remaining
+                or not self._has_ticket_authority(ticket, principal, route.assignee)
+            ):
+                return False
+            hop = ApprovalHop(
+                from_actor=principal.actor, to=route.remaining[0], at=now, reason="forwarded", summary=summary
+            )
+            updated = ticket.model_copy(update={"route": route.advance(self._escalation_timeout, now=now, hop=hop)})
+            return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
+
+    def _read_current_ticket(self, anchored: Any, key: str) -> tuple[dict[str, Any], ApprovalTicket] | None:
+        # A due timeout advances one eligible hop. Re-read on CAS conflict
+        # so a concurrent decision or manual forwarding always survives.
+        while True:
+            raw = anchored.read(key)
+            if not isinstance(raw, dict):
+                return None
+            ticket = ApprovalTicket.model_validate(raw)
+            route = ticket.route
+            if (
+                ticket.status != "pending"
+                or route is None
+                or route.assignee is None
+                or route.deadline is None
+                or not route.remaining
+                or ticket.request is None
+            ):
+                return raw, ticket
+            now = self._now()
+            if now < route.deadline or ticket.expires_at <= now:
+                return raw, ticket
+            hop = ApprovalHop(
+                from_actor=route.assignee.actor,
+                to=route.remaining[0],
+                at=now,
+                reason="timeout",
+                summary=EscalationSummary(
+                    what=ticket.request.action,
+                    why="The assignee did not decide before the routing deadline.",
+                    risk="The assignee did not provide a risk assessment.",
+                    alternatives=(),
+                ),
+            )
+            updated = ticket.model_copy(update={"route": route.advance(self._escalation_timeout, now=now, hop=hop)})
+            updated_raw = updated.model_dump(mode="json")
+            if anchored.compare_and_swap(key, raw, updated_raw):
+                return updated_raw, updated
+
     def consume_typed_ticket(self, approval_id: str, *, executor: ExecutorContext) -> bool:
         """Atomically consume an approval bound to its task, attempt and digest."""
+        return self._consume_typed_ticket(approval_id, executor=executor)
+
+    def _consume_typed_ticket(
+        self, approval_id: str, *, executor: ExecutorContext, service_call: ServiceCall | None = None
+    ) -> bool:
         executor = ExecutorContext.model_validate(executor)
         key = self._key(approval_id)
         with self._anchored() as anchored:
@@ -800,9 +1284,11 @@ class ApprovalQueue:
             now = self._now()
             if (
                 request is None
+                or request.service_call != service_call
                 or ticket.status != "approved"
                 or ticket.decision is None
                 or ticket.decision.verdict != "approved"
+                or (request.tier is not None and ticket.decision.grant is None)
                 or ticket.consumed_at is not None
                 or ticket.expires_at <= now
                 or not _request_matches_executor(request, executor)
@@ -816,6 +1302,17 @@ class ApprovalQueue:
         self, approval_id: str, *, executor: ExecutorContext, succeeded: bool, detail: str | None = None
     ) -> bool:
         """Record the effect result once, only for the executor that consumed it."""
+        return self._record_effect_outcome(approval_id, executor=executor, succeeded=succeeded, detail=detail)
+
+    def _record_effect_outcome(
+        self,
+        approval_id: str,
+        *,
+        executor: ExecutorContext,
+        succeeded: bool,
+        detail: str | None = None,
+        service_call: ServiceCall | None = None,
+    ) -> bool:
         executor = ExecutorContext.model_validate(executor)
         key = self._key(approval_id)
         with self._anchored() as anchored:
@@ -826,6 +1323,7 @@ class ApprovalQueue:
             request = ticket.request
             if (
                 request is None
+                or request.service_call != service_call
                 or ticket.consumed_at is None
                 or ticket.effect_outcome is not None
                 or not _request_matches_executor(request, executor)
@@ -833,7 +1331,10 @@ class ApprovalQueue:
             ):
                 return False
             outcome = ApprovalEffectOutcome(
-                executor=executor.actor, recorded_at=self._now(), succeeded=succeeded, detail=detail
+                executor=service_call.agent if service_call else executor.actor,
+                recorded_at=self._now(),
+                succeeded=succeeded,
+                detail=detail,
             )
             updated = ticket.model_copy(update={"effect_outcome": outcome})
             return anchored.compare_and_swap(key, raw, updated.model_dump(mode="json"))
@@ -914,10 +1415,10 @@ class ApprovalQueue:
         Use :meth:`read_feedback_answer` to retrieve an answer with requester bindings.
         """
         with self._anchored() as anchored:
-            raw = anchored.read(self._key(approval_id))
-        if not isinstance(raw, dict):
+            current = self._read_current_ticket(anchored, self._key(approval_id))
+        if current is None:
             return None
-        ticket = ApprovalTicket.model_validate(raw)
+        _, ticket = current
         if ticket.status == "pending" and not ticket.legacy and ticket.expires_at <= self._now():
             return ticket.model_copy(update={"status": "expired"})
         return ticket
@@ -934,7 +1435,9 @@ class ApprovalQueue:
         ranked.sort(key=lambda item: (item[0], item[1].created_at, item[1].approval_id))
         return [ticket for _, ticket in ranked[:limit]]
 
-    def list_pending_tickets(self, *, limit: int = 100) -> list[ApprovalTicket]:
+    def list_pending_tickets(
+        self, *, limit: int = 100, assignee: ApproverContext | None = None
+    ) -> list[ApprovalTicket]:
         """Unexpired approval tickets awaiting a decision, oldest first (FIFO queue).
 
         See :meth:`list_pending_feedback` for structured feedback requests.
@@ -953,7 +1456,17 @@ class ApprovalQueue:
         """
         if limit <= 0:
             raise ValueError(f"limit must be positive, got {limit}")
-        tickets = [ticket for ticket in self._pending_tickets() if ticket.feedback_request is None]
+        tickets = []
+        for ticket in self._pending_tickets():
+            if ticket.feedback_request is not None:
+                continue
+            if ticket.route is not None:
+                latest = self.get_ticket(ticket.approval_id)
+                if latest is None or latest.status != "pending":
+                    continue
+                ticket = latest
+            if assignee is None or self._has_ticket_authority(ticket, assignee, route_ticket(ticket)):
+                tickets.append(ticket)
         tickets.sort(key=lambda t: t.created_at)
         return tickets[:limit]
 

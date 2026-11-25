@@ -30,6 +30,7 @@ primitive every agent needs. Nothing here is provider-specific — one
 
 from __future__ import annotations
 
+from lazybridge.ext.approval.cards import CardApproval, CardProposal, CardTemplate
 from lazybridge.ext.approval.queue import (
     DEFAULT_DENIAL_PREFIX,
     DEFAULT_NOTIFY_FAILURE_PREFIX,
@@ -42,7 +43,6 @@ from lazybridge.ext.approval.queue import (
     ApprovalQueue,
     ApprovalTarget,
     ApprovalTicket,
-    ApproverContext,
     ExecutorContext,
     FeedbackAnswer,
     FeedbackPriority,
@@ -56,6 +56,15 @@ from lazybridge.ext.approval.queue import (
     redact_approval_payload,
     ticket_gist,
 )
+from lazybridge.ext.approval.routing import (
+    ApprovalGrantUse,
+    ApprovalHop,
+    ApprovalRoute,
+    ApproverContext,
+    EscalationSummary,
+    route_ticket,
+)
+from lazybridge.ext.approval.service import ServiceAgent
 from lazybridge.ext.approval.tiered import (
     AuditRecord,
     Channel,
@@ -76,18 +85,26 @@ __all__ = [
     "ApprovalQueue",
     "ApprovalDecision",
     "ApprovalEffectOutcome",
+    "ApprovalGrantUse",
+    "ApprovalHop",
+    "ApprovalRoute",
     "ApprovalTicket",
     "ApprovalTarget",
     "ApproverContext",
     "AuditRecord",
+    "CardApproval",
+    "CardProposal",
+    "CardTemplate",
     "Channel",
     "Rule",
     "ExecutorContext",
+    "EscalationSummary",
     "FeedbackAnswer",
     "FeedbackPriority",
     "FeedbackRequest",
     "FeedbackResponder",
     "RequestExecutorContext",
+    "ServiceAgent",
     "StoreApprovalChannel",
     "TerminalChannel",
     "TicketKind",
@@ -96,6 +113,7 @@ __all__ = [
     "Tier",
     "TieredGate",
     "run_gate_sync",
+    "route_ticket",
     "ticket_gist",
     "redact_approval_payload",
 ]

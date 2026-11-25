@@ -69,15 +69,16 @@ class AgentPool:
         try:
             # ``_run_as_tool`` so a ``conclude`` raised downstream propagates
             # past this level to the original top-level caller.
-            return (await agent._run_as_tool(task)).text()
+            runner = getattr(agent, "_run_as_delegated_tool", None) or agent._run_as_tool
+            return (await runner(task)).text()
         finally:
             self._depth.reset(token)
 
-    def as_tool(self, name: str = "route") -> Tool:
+    def as_tool(self, name: str = "route", *, policy_grant: str | None = None) -> Tool:
         """Wrap routing as a ``route(agent_name, task)`` tool for ``tools=[...]``.
 
         Pass a distinct ``name`` to give one agent access to several pools
         without a tool-name collision, e.g.
         ``tools=[my_team.as_tool("ask_team"), peers.as_tool("ask_peer")]``.
         """
-        return Tool.wrap(self.route, name=name)
+        return Tool(self.route, name=name, policy_grant=policy_grant)

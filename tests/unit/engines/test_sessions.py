@@ -6,6 +6,7 @@ import json
 import os
 import threading
 import warnings
+from pathlib import Path
 
 import pytest
 
@@ -285,11 +286,10 @@ class TestLocation:
         assert (tmp_path / "arg.json").exists()
         assert not (tmp_path / "env.json").exists()
 
-    def test_default_location_is_per_user(self, monkeypatch):
+    def test_default_location_is_per_user(self, tmp_path, monkeypatch):
         monkeypatch.delenv(SESSIONS_FILE_ENV, raising=False)
-        path = SessionRegistry().path
-        assert path.name == "sessions.json"
-        assert ".lazybridge" in path.parts
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        assert SessionRegistry().path == tmp_path / ".lazybridge" / "sessions.json"
 
     def test_default_registry_accessor_is_overridable(self, registry):
         previous = set_default_session_registry(registry)
