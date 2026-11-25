@@ -8,6 +8,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-11-25
+
+### Added
+
+- Route approval tickets to the nearest ancestor in the recorded invocation chain that has authority for the request tier (routine, sensitive, external); external-tier requests go only to the owner or an independent approver. Routing never trusts request labels. (#269)
+- Add attenuating auto-approval cards in `lazybridge.policy.cards`: a parent hands a child narrower copies of cards it holds, matching requests run without a ticket, and revoking an original card revokes every copy. (#269)
+- Authenticate typed approval decisions with registry credentials (stored as hashes) or a private per-invocation credential; separation of duties compares agent identity, not names, and an ancestor with the same agent identity counts as the requester. (#269)
+- A tool agent wider than its caller runs with the intersection of both policies; service agents act only through an approved request. (#269)
+
 ### Fixed
 
 - Allow signed version 1 refusal receipts to include the existing PR number for `pr_head_mismatch` and `pr_not_draft`. (D202)
