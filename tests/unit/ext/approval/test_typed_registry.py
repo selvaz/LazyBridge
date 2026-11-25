@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -126,31 +128,34 @@ def test_public_identity_fields_do_not_authenticate(registry: tuple[ApprovalQueu
 def test_operator_cli_stores_only_the_hash_and_binds_it_to_the_queue(tmp_path: Path) -> None:
     db = str(tmp_path / "queue.sqlite")
     output = tmp_path / "owner.credential"
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "lazybridge.ext.approval",
-            "--db",
-            db,
-            "--prefix",
-            "routed:",
-            "issue-approver-credential",
-            "owner",
-            "--role",
-            "owner",
-            "--role",
-            "audit",
-            "--output",
-            str(output),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    command = [
+        sys.executable,
+        "-m",
+        "lazybridge.ext.approval",
+        "--db",
+        db,
+        "--prefix",
+        "routed:",
+        "issue-approver-credential",
+        "owner",
+        "--output",
+        str(output),
+    ]
+    invalid = subprocess.run([*command, "--role", " "], capture_output=True, text=True)
+    assert invalid.returncode != 0
+    assert not output.exists()
+
+    command.extend(["--role", "owner", "--role", "audit"])
+    result = subprocess.run(command, capture_output=True, text=True, check=True)
     assert result.stdout == result.stderr == ""
+    if os.name == "posix":
+        assert stat.S_IMODE(output.stat().st_mode) & 0o077 == 0
     secret = output.read_text(encoding="ascii").strip()
     assert len(secret) == 43
+    collision = subprocess.run(command, capture_output=True, text=True)
+    assert collision.returncode == 2
+    assert "output file already exists" in collision.stderr
+    assert output.read_text(encoding="ascii").strip() == secret
     digest = hashlib.sha256(secret.encode()).hexdigest()
     with Store(db=db) as store:
         [(key, record)] = list(store.items())

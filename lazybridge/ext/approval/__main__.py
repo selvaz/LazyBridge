@@ -29,8 +29,12 @@ def main() -> None:
             fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
             parser.error("the credential output file already exists")
-        with os.fdopen(fd, "w", encoding="ascii") as output:
-            output.write(queue.issue_approver_credential(args.principal, args.role) + "\n")
+        try:
+            with os.fdopen(fd, "w", encoding="ascii") as output:
+                output.write(queue.issue_approver_credential(args.principal, args.role) + "\n")
+        except Exception:
+            args.output.unlink(missing_ok=True)
+            raise
 
 
 if __name__ == "__main__":
