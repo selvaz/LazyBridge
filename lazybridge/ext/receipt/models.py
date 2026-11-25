@@ -129,8 +129,12 @@ class PublicationReceipt(_ReceiptModel):
     @model_validator(mode="after")
     def _refusal_shape(self) -> Self:
         if self.outcome.status == "refused" and not self._has_valid_refusal():
-            raise ValueError("A refused receipt requires a null PR number and a refusal reason")
+            raise ValueError(
+                "A refused receipt requires a refusal reason and may carry a PR number "
+                "only for pr_head_mismatch or pr_not_draft"
+            )
         return self
 
     def _has_valid_refusal(self) -> bool:
-        return self.publication.pr_number is None and bool(self.outcome.refusal_reason)
+        reason = self.outcome.refusal_reason
+        return bool(reason) and (self.publication.pr_number is None or reason in ("pr_head_mismatch", "pr_not_draft"))
