@@ -180,6 +180,17 @@ def test_refused_after_approval_head_drift(fields: dict[str, Any], key: IssuerKe
     assert _verify_json(signed.model_dump_json(), public_key, HEAD) == VerificationResult(True)
 
 
+@pytest.mark.parametrize("reason", ["pr_head_mismatch", "pr_not_draft"])
+@pytest.mark.parametrize("pr_number", [42, None])
+def test_refused_after_pr_creation(fields: dict[str, Any], key: IssuerKey, reason: str, pr_number: int | None) -> None:
+    fields["publication"]["pr_number"] = pr_number
+    fields["outcome"] = {"status": "refused", "refusal_reason": reason}
+    signed = sign(PublicationReceipt.model_validate(fields), key)
+    public_key = key.public_key_pem()
+    assert verify(signed, public_key) == VerificationResult(True)
+    assert _verify_json(signed.model_dump_json(), public_key, None) == VerificationResult(True)
+
+
 @pytest.mark.parametrize(("pr_number", "reason"), [(42, "head_changed_after_review"), (None, ""), (None, None)])
 def test_verify_rejects_malformed_refusals(
     fields: dict[str, Any], key: IssuerKey, pr_number: int | None, reason: str | None

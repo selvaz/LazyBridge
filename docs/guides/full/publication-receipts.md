@@ -57,7 +57,10 @@ exits `1`. In Python, use
 `reason` from the result.
 
 A refused receipt verifies with a valid signature, supported version, matching
-issuer, non-empty `outcome.refusal_reason`, and null `publication.pr_number`.
+issuer, and non-empty `outcome.refusal_reason`. Version 1 receipts with reason
+`pr_head_mismatch` or `pr_not_draft` may record the existing PR in
+`publication.pr_number` and `publication.pr_url`. All other refusal reasons
+require a null `publication.pr_number`.
 Record the live head the executor observed in `publication.head_sha`. Keep the
 original `reviewer.reviewed_sha`, `approval.target.head_sha`, and check SHAs so
 the receipt shows any drift. The head comparisons apply only to published

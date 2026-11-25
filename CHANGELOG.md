@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Allow signed version 1 refusal receipts to include the existing PR number for `pr_head_mismatch` and `pr_not_draft`. (D202)
+
 ## [1.9.2] - 2026-11-24
 
 ### Added
