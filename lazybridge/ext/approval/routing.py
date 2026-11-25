@@ -159,7 +159,8 @@ def build_route(
 
 class _RoutedTicket(Protocol):
     @property
-    def route(self) -> ApprovalRoute | None: ...
+    def route(self) -> ApprovalRoute | None:
+        pass
 
 
 def route_ticket(ticket: _RoutedTicket) -> ApprovalGrantUse | None:
