@@ -130,8 +130,8 @@ class Agent:
 
     @property
     def _policy_agent_id(self) -> str:
-        # Older instances and subclasses can enter without running Agent.__init__.
-        identity = getattr(self, "_policy_identity", None)
+        # Agents that bypass __init__ still need a stable, per-instance identity.
+        identity = self.__dict__.get("_policy_identity")
         if identity is None:
             identity = self.__dict__.setdefault("_policy_identity", uuid.uuid4().hex)
         return identity
