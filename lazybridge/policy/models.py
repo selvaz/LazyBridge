@@ -8,9 +8,17 @@ from pathlib import Path
 from typing import Any
 
 from .cards import ApprovalCard
-from .errors import PolicyDenied as PolicyDenied
-from .errors import PolicyError as PolicyError
-from .errors import PolicyWidening as PolicyWidening
+from .errors import PolicyDenied, PolicyError, PolicyWidening
+
+__all__ = [
+    "EffectivePolicy",
+    "PolicyDenied",
+    "PolicyError",
+    "PolicyWidening",
+    "Profile",
+    "ProfileDocument",
+    "TaskGrant",
+]
 
 
 @dataclass(frozen=True)
