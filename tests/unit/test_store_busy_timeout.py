@@ -15,21 +15,15 @@ from lazybridge import store as store_module
 
 def test_default_busy_timeout_is_thirty_seconds(tmp_path, monkeypatch):
     monkeypatch.delenv("LAZYBRIDGE_STORE_BUSY_TIMEOUT", raising=False)
-    store = Store(str(tmp_path / "s.sqlite"))
-    try:
+    with Store(str(tmp_path / "s.sqlite")) as store:
         assert store._conn().execute("PRAGMA busy_timeout").fetchone()[0] == 30000
-    finally:
-        store.close()
 
 
 @pytest.mark.parametrize(("raw", "expected"), [("2.5", 2500), ("0", 30000), ("bad", 30000)])
 def test_busy_timeout_follows_the_environment(tmp_path, monkeypatch, raw, expected):
     monkeypatch.setenv("LAZYBRIDGE_STORE_BUSY_TIMEOUT", raw)
-    store = Store(str(tmp_path / "s.sqlite"))
-    try:
+    with Store(str(tmp_path / "s.sqlite")) as store:
         assert store._conn().execute("PRAGMA busy_timeout").fetchone()[0] == expected
-    finally:
-        store.close()
 
 
 def test_a_write_waits_for_a_held_lock_and_logs_the_wait(tmp_path, monkeypatch, caplog):
@@ -59,14 +53,11 @@ def test_a_write_waits_for_a_held_lock_and_logs_the_wait(tmp_path, monkeypatch, 
 
 
 def test_fast_writes_are_not_logged(tmp_path, caplog):
-    store = Store(str(tmp_path / "s.sqlite"))
-    try:
+    with Store(str(tmp_path / "s.sqlite")) as store:
         with caplog.at_level(logging.WARNING, logger="lazybridge.store"):
             store.write("a", 1)
             assert store.compare_and_swap("a", 1, 2)
         assert not [r for r in caplog.records if r.name == "lazybridge.store"]
-    finally:
-        store.close()
 
 
 def test_module_exports_the_defaults():
