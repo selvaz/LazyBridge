@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
+import os
 import sqlite3
 import threading
 import time
@@ -68,7 +70,7 @@ class Store:
             raise RuntimeError("Store is closed")
         if not hasattr(self._local, "conn"):
             conn = sqlite3.connect(self._db, check_same_thread=False)
-            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute(f"PRAGMA busy_timeout={int(_busy_timeout_seconds() * 1000)}")
             _enable_wal(conn)
             conn.row_factory = sqlite3.Row
             self._local.conn = conn
@@ -254,6 +256,7 @@ class Store:
         if self._db:
             serialised = _to_jsonable(value)
             conn = self._conn()
+            started = time.monotonic()
             try:
                 conn.execute(
                     "INSERT OR REPLACE INTO store (key, value, written_at, agent_id) VALUES (?,?,?,?)",
@@ -263,6 +266,8 @@ class Store:
             except sqlite3.Error:
                 self._recover_after_failed_write(conn, caller="write")
                 raise
+            finally:
+                _note_slow_write("write", key, started, self._db)
         else:
             with self._lock:
                 self._mem[key] = StoreEntry(key=key, value=_deep_copy_safe(value), agent_id=agent_id)
@@ -441,6 +446,7 @@ class Store:
         # SQLite path — serialise concurrent writers via reserved lock.
         conn = self._conn()
         serialised_new = json.dumps(_to_jsonable(new), default=str)
+        started = time.monotonic()
         with self._lock:
             try:
                 conn.execute("BEGIN IMMEDIATE")
@@ -464,6 +470,8 @@ class Store:
                 # connection and poisoning every subsequent call on that thread.
                 self._recover_after_failed_write(conn, rollback_sql="ROLLBACK", caller="compare_and_swap")
                 raise
+            finally:
+                _note_slow_write("compare_and_swap", key, started, self._db)
 
     def to_text(self, keys: list[str] | None = None) -> str:
         data = self.read_all()
@@ -564,8 +572,36 @@ class Store:
                 self._agent_memory.pop((agent_id, session_key), None)
 
 
-#: How long a new connection keeps retrying the switch to WAL.
-_WAL_RETRY_SECONDS = 5.0
+_log = logging.getLogger("lazybridge.store")
+
+#: Default wait for a SQLite lock before "database is locked". Five seconds was too
+#: short for one Store shared by several processes (jobs, a dispatcher, readers):
+#: a write behind a long transaction failed a job after minutes of work.
+DEFAULT_BUSY_TIMEOUT_SECONDS = 30.0
+#: A write slower than this is logged with its operation and key, to find long lock holders.
+DEFAULT_SLOW_WRITE_SECONDS = 1.0
+
+
+def _env_seconds(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _busy_timeout_seconds() -> float:
+    """Lock wait for every Store connection (``LAZYBRIDGE_STORE_BUSY_TIMEOUT``, seconds)."""
+    return _env_seconds("LAZYBRIDGE_STORE_BUSY_TIMEOUT", DEFAULT_BUSY_TIMEOUT_SECONDS)
+
+
+def _note_slow_write(operation: str, key: str, started: float, db: str | None) -> None:
+    elapsed = time.monotonic() - started
+    if elapsed >= _env_seconds("LAZYBRIDGE_STORE_SLOW_WRITE", DEFAULT_SLOW_WRITE_SECONDS):
+        _log.warning("slow Store %s on %r: %.2fs (lock wait or contention) in %s", operation, key, elapsed, db)
 
 
 def _enable_wal(conn: sqlite3.Connection) -> None:
@@ -576,9 +612,9 @@ def _enable_wal(conn: sqlite3.Connection) -> None:
     the same (especially fresh) database at once got an immediate "database is
     locked" on this pragma -- about two times in three when four connections
     open together. Seen in CI as a bridge job failing at startup. Retried with
-    a short backoff for up to the same five seconds busy_timeout allows.
+    a short backoff for up to the same time busy_timeout allows.
     """
-    deadline = time.monotonic() + _WAL_RETRY_SECONDS
+    deadline = time.monotonic() + _busy_timeout_seconds()
     delay = 0.005
     while True:
         try:
