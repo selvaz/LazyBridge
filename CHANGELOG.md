@@ -8,6 +8,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- `Store`: SQLite lock wait raised from 5 s to 30 s (`LAZYBRIDGE_STORE_BUSY_TIMEOUT`, seconds), also for the switch to WAL; a Store shared by several processes failed a job after minutes of work. Writes slower than `LAZYBRIDGE_STORE_SLOW_WRITE` (default 1 s) are logged on `lazybridge.store` with operation and key, to find long lock holders.
+
 ## [1.10.0] - 2026-11-25
 
 ### Added
