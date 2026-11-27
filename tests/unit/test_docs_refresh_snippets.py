@@ -296,7 +296,7 @@ def test_restoration_manifest_covers_every_touched_python_fence():
 
 def test_llmstxt_config_excerpt_matches_the_build():
     """The restored YAML recipe selects actual configured sections."""
-    yaml = pytest.importorskip("yaml")
+    import yaml
 
     page = (ROOT / "docs/for-llms/llms-txt.md").read_text(encoding="utf-8")
     code = re.search(r"^```yaml\n(.*?)^```", page, re.M | re.S).group(1)

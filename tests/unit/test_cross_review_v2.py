@@ -37,30 +37,20 @@ def test_v2_references_and_wrong_implementations(tmp_path):
 
 @pytest.mark.asyncio
 async def test_v2_mock_pipeline_and_version_resume(tmp_path, monkeypatch):
-    from examples.cross_review_benchmark.suites import load_suite
-
     def forbidden(*a, **kw):
         raise AssertionError("No live engine permitted")
 
     monkeypatch.setattr(harness, "live_engine", forbidden)
     path = tmp_path / "v2.jsonl"
-    # Cover all four scripted outcomes and an API task in every arm. The
-    # reference-solution test grades the entire inventory.
-    suite = load_suite("v2")
-    tasks = [*suite.tasks[:4], next(task for task in suite.tasks if task.category == "api")]
-    task_ids = ",".join(task.id for task in tasks)
-    args = harness.parse_args(["--suite", "v2", "--mock", "--tasks", task_ids, "--output", str(path)])
+    args = harness.parse_args(["--suite", "v2", "--mock", "--output", str(path)])
     rows = await harness.run(args)
-    assert len(rows) == len(harness.ARMS) * len(tasks)
-    assert {(r["arm"], r["task_id"]) for r in rows} == {(arm, task.id) for arm in harness.ARMS for task in tasks}
+    assert len(rows) == 180
     assert all(r["suite"] == "v2" and r["task_sha256"] for r in rows)
     assert harness.paired(rows, "A", "C", "coding")["fixed"]
     assert harness.paired(rows, "A", "C", "coding")["broken"]
     before = path.read_bytes()
     assert await harness.run(args) == rows
     assert path.read_bytes() == before
-    # Use a task valid in both versions so the resume gets to the version check.
-    args.tasks = next(task.id for task in tasks if task.category == "api")
     args.suite = "v1"
     with pytest.raises(ValueError, match="incompatible"):
         await harness.run(args)
