@@ -7,9 +7,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import datetime
 from pathlib import Path
-from time import time_ns
-from typing import TYPE_CHECKING, Literal
-from urllib.parse import quote
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,7 +19,7 @@ if TYPE_CHECKING:
     from lazybridge.policy import ApprovalTier, PolicyContext
 
 CardTemplate = Literal["coder", "reviewer", "researcher"]
-_MIGRATED = "per-card-v1"
+_Result = TypeVar("_Result")
 
 
 class CardApproval(BaseModel):
@@ -55,171 +53,113 @@ class CardProposal(BaseModel):
     occurrences: int = 1
 
 
-class _LegacyCardState(BaseModel):
+class _CardState(BaseModel):
     cards: dict[str, ApprovalCard] = Field(default_factory=dict)
     revoked: set[str] = Field(default_factory=set)
     used: dict[str, int] = Field(default_factory=dict)
     approvals: list[CardApproval] = Field(default_factory=list)
     templates: dict[CardTemplate, tuple[str, ...]] = Field(default_factory=dict)
 
-
-class _CardRecord(BaseModel):
-    card: ApprovalCard
-    revoked: bool = False
-    used: int = 0
-
-    def retired(self, now: datetime) -> bool:
-        return self.revoked or (self.card.expires_at is not None and self.card.expires_at <= now)
-
-    def live(self, now: datetime) -> bool:
-        return not self.retired(now) and (self.card.max_uses is None or self.used < self.card.max_uses)
+    def live(self, card: ApprovalCard, now: datetime) -> bool:
+        for card_id in card.chain:
+            source = self.cards.get(card_id)
+            if source is None or card_id in self.revoked:
+                return False
+            if source.expires_at is not None and source.expires_at <= now:
+                return False
+            if source.max_uses is not None and self.used.get(card_id, 0) >= source.max_uses:
+                return False
+        return True
 
 
 class _CardRegistry:
+    # One CAS binds usage against every ancestor's budget, revocation and the audit record.
     def __init__(
         self, anchored: Callable[[], AbstractContextManager[Store]], key: str, clock: Callable[[], datetime]
     ) -> None:
         self._anchored = anchored
         self._key = key
-        self._card_prefix = f"{key}:card:"
-        self._receipt_prefix = f"{key}:receipt:"
         self._clock = clock
 
-    def _card_key(self, card_id: str) -> str:
-        return self._card_prefix + quote(card_id, safe="")
-
-    def _migrate(self, store: Store) -> None:
-        # Replace the old document and publish all its records in one transaction.
-        # The marker also makes an older registry fail closed if it reads this key.
-        while True:
-            raw = store.read(self._key)
-            if raw == _MIGRATED:
-                return
-            state = _LegacyCardState.model_validate(raw) if raw is not None else _LegacyCardState()
-            updates: dict[str, object] = {self._key: _MIGRATED}
-            updates.update(
-                {
-                    self._card_key(card_id): _CardRecord(
-                        card=card, revoked=card_id in state.revoked, used=state.used.get(card_id, 0)
-                    ).model_dump(mode="json")
-                    for card_id, card in state.cards.items()
-                }
-            )
-            updates.update({f"{self._key}:template:{name}": list(ids) for name, ids in state.templates.items()})
-            updates.update(
-                {
-                    f"{self._receipt_prefix}0-{index:020d}": receipt.model_dump(mode="json")
-                    for index, receipt in enumerate(state.approvals)
-                }
-            )
-            if store.compare_and_swap_many({self._key: raw}, updates):
-                return
-
-    def _live_chain(
-        self, store: Store, card: ApprovalCard, now: datetime
-    ) -> dict[str, tuple[dict, _CardRecord]] | None:
-        chain = {}
-        for card_id in card.chain:
-            key = self._card_key(card_id)
-            raw = store.read(key)
-            if raw is None:
-                return None
-            record = _CardRecord.model_validate(raw)
-            if not record.live(now) or (card_id == card.card_id and record.card != card):
-                return None
-            chain[key] = raw, record
-        return chain
+    def _update(self, change: Callable[[_CardState], _Result | None]) -> _Result | None:
+        with self._anchored() as store:
+            while True:
+                raw = store.read(self._key)
+                state = _CardState.model_validate(raw) if raw is not None else _CardState()
+                result = change(state)
+                if result is None or store.compare_and_swap(self._key, raw, state.model_dump(mode="json")):
+                    return result
 
     def issue(self, card: ApprovalCard) -> ApprovalCard:
-        with self._anchored() as store:
-            self._migrate(store)
+        def add(state: _CardState) -> ApprovalCard:
             if card.expires_at is not None and card.expires_at <= self._clock():
                 raise ValueError("card must expire in the future")
-            key = self._card_key(card.card_id)
-            if not store.compare_and_swap(key, None, _CardRecord(card=card).model_dump(mode="json")):
-                raise ValueError("card ID already exists")
-        return card
+            state.cards[card.card_id] = card
+            return card
+
+        issued = self._update(add)
+        assert issued is not None
+        return issued
 
     def copy(self, source: ApprovalCard, child: ApprovalCard) -> ApprovalCard:
         validate_card_copy(source, child)
-        key = self._card_key(child.card_id)
-        updates = {key: _CardRecord(card=child).model_dump(mode="json")}
-        with self._anchored() as store:
-            self._migrate(store)
-            while True:
-                now = self._clock()
-                chain = self._live_chain(store, source, now)
-                if chain is None:
-                    raise PolicyWidening("source card is unavailable")
-                if child.expires_at is not None and child.expires_at <= now:
-                    raise ValueError("card must expire in the future")
-                expected: dict[str, object] = {source_key: raw for source_key, (raw, _) in chain.items()}
-                expected[key] = None
-                if store.compare_and_swap_many(expected, updates):
-                    return child
-                if store.read(key) is not None:
-                    raise ValueError("card ID already exists")
+
+        def add(state: _CardState) -> ApprovalCard:
+            now = self._clock()
+            if state.cards.get(source.card_id) != source or not state.live(source, now):
+                raise PolicyWidening("source card is unavailable")
+            if child.expires_at is not None and child.expires_at <= now:
+                raise ValueError("card must expire in the future")
+            state.cards[child.card_id] = child
+            return child
+
+        copied = self._update(add)
+        assert copied is not None
+        return copied
 
     def revoke(self, card_id: str) -> bool:
-        key = self._card_key(card_id)
-        with self._anchored() as store:
-            self._migrate(store)
-            while (raw := store.read(key)) is not None:
-                record = _CardRecord.model_validate(raw)
-                if record.revoked:
-                    return False
-                record.revoked = True
-                if store.compare_and_swap(key, raw, record.model_dump(mode="json")):
-                    return True
-        return False
+        def revoke(state: _CardState) -> bool | None:
+            if card_id not in state.cards or card_id in state.revoked:
+                return None
+            state.revoked.add(card_id)
+            return True
+
+        return self._update(revoke) is True
 
     def set_template(self, name: CardTemplate, card_ids: tuple[str, ...]) -> None:
-        key = f"{self._key}:template:{name}"
-        ids = list(dict.fromkeys(card_ids))
-        with self._anchored() as store:
-            self._migrate(store)
-            while True:
-                expected = {key: store.read(key)}
-                now = self._clock()
-                for card_id in ids:
-                    card_key = self._card_key(card_id)
-                    raw = store.read(card_key)
-                    record = _CardRecord.model_validate(raw) if raw is not None else None
-                    if record is None or record.card.provenance or not record.card.transferable or not record.live(now):
-                        raise PolicyWidening("templates require live transferable original cards")
-                    expected[card_key] = raw
-                if store.compare_and_swap_many(expected, {key: ids}):
-                    return
+        def set_hand(state: _CardState) -> bool:
+            now = self._clock()
+            for card_id in card_ids:
+                card = state.cards.get(card_id)
+                if card is None or card.provenance or not card.transferable or not state.live(card, now):
+                    raise PolicyWidening("templates require live transferable original cards")
+            state.templates[name] = tuple(dict.fromkeys(card_ids))
+            return True
+
+        self._update(set_hand)
 
     def copy_template(self, name: CardTemplate, hand: tuple[ApprovalCard, ...]) -> tuple[ApprovalCard, ...]:
-        key = f"{self._key}:template:{name}"
-        with self._anchored() as store:
-            self._migrate(store)
-            while roots := store.read(key):
-                now = self._clock()
-                expected = {key: roots}
-                updates = {}
-                copies = []
-                for card in hand:
-                    if card.chain[0] not in roots or not card.transferable:
-                        continue
-                    chain = self._live_chain(store, card, now)
-                    if chain is None:
-                        continue
-                    child = card.model_copy(
-                        update={"card_id": uuid.uuid4().hex, "provenance": card.chain, "transferable": False}
-                    )
-                    child_key = self._card_key(child.card_id)
-                    expected.update((source_key, raw) for source_key, (raw, _) in chain.items())
-                    expected[child_key] = None
-                    updates[child_key] = _CardRecord(card=child).model_dump(mode="json")
-                    copies.append(child)
-                if not copies:
-                    if store.read(key) == roots:
-                        return ()
-                elif store.compare_and_swap_many(expected, updates):
-                    return tuple(copies)
-        return ()
+        def copy(state: _CardState) -> tuple[ApprovalCard, ...] | None:
+            now = self._clock()
+            roots = state.templates.get(name, ())
+            sources = tuple(
+                card
+                for card in hand
+                if card.chain[0] in roots
+                and card.transferable
+                and state.cards.get(card.card_id) == card
+                and state.live(card, now)
+            )
+            if not sources:
+                return None
+            copies = tuple(
+                card.model_copy(update={"card_id": uuid.uuid4().hex, "provenance": card.chain, "transferable": False})
+                for card in sources
+            )
+            state.cards.update((card.card_id, card) for card in copies)
+            return copies
+
+        return self._update(copy) or ()
 
     def approve(
         self,
@@ -237,66 +177,36 @@ class _CardRegistry:
         if policy is None or not policy.approval_cards or tier == "external":
             return None
 
-        with self._anchored() as store:
-            self._migrate(store)
+        def approve(state: _CardState) -> CardApproval | None:
+            now = self._clock()
             for card in policy.approval_cards:
-                if not card_matches(card, action, paths, action_class=action_class, tier=tier, task_id=task_id):
+                if (
+                    state.cards.get(card.card_id) != card
+                    or not state.live(card, now)
+                    or not card_matches(card, action, paths, action_class=action_class, tier=tier, task_id=task_id)
+                ):
                     continue
-                while True:
-                    now = self._clock()
-                    chain = self._live_chain(store, card, now)
-                    if chain is None:
-                        break
-                    approval = CardApproval(
-                        card_id=card.card_id,
-                        chain=card.chain,
-                        task_id=task_id,
-                        action=action_name,
-                        action_class=action_class,
-                        actor=requester.actor,
-                        invocation_id=requester.invocation_id,
-                        policy_digest=policy.digest,
-                        request_digest=request_digest,
-                        approved_at=now,
-                    )
-                    receipt_key = f"{self._receipt_prefix}1-{time_ns():020d}-{uuid.uuid4().hex}"
-                    expected: dict[str, object] = {key: raw for key, (raw, _) in chain.items()}
-                    updates = {}
-                    for key, (_, record) in chain.items():
-                        record.used += 1
-                        updates[key] = record.model_dump(mode="json")
-                    expected[receipt_key] = None
-                    updates[receipt_key] = approval.model_dump(mode="json")
-                    if store.compare_and_swap_many(expected, updates):
-                        return approval
-        return None
+                for card_id in card.chain:
+                    state.used[card_id] = state.used.get(card_id, 0) + 1
+                approval = CardApproval(
+                    card_id=card.card_id,
+                    chain=card.chain,
+                    task_id=task_id,
+                    action=action_name,
+                    action_class=action_class,
+                    actor=requester.actor,
+                    invocation_id=requester.invocation_id,
+                    policy_digest=policy.digest,
+                    request_digest=request_digest,
+                    approved_at=now,
+                )
+                state.approvals.append(approval)
+                return approval
+            return None
+
+        return self._update(approve)
 
     def approvals(self) -> list[CardApproval]:
         with self._anchored() as store:
-            self._migrate(store)
-            items = store.items(prefix=self._receipt_prefix)
-        return [
-            CardApproval.model_validate(raw)
-            for key, raw in sorted(items)
-            if ":" not in key[len(self._receipt_prefix) :]
-        ]
-
-    def prune_copies(self) -> int:
-        with self._anchored() as store:
-            self._migrate(store)
-            now = self._clock()
-            records = {
-                key: (raw, _CardRecord.model_validate(raw))
-                for key, raw in store.items(prefix=self._card_prefix)
-                if ":" not in key[len(self._card_prefix) :]
-            }
-            unretired = {key for key, (_, record) in records.items() if not record.retired(now)}
-            removed = 0
-            for key, (raw, record) in records.items():
-                if record.card.provenance and any(
-                    self._card_key(card_id) not in unretired for card_id in record.card.chain
-                ):
-                    # Retirement is final. The CAS avoids racing a concurrent
-                    # deletion or deleting a row that changed after this scan.
-                    removed += store.compare_and_swap_many({key: raw}, {}, delete=(key,))
-            return removed
+            raw = store.read(self._key)
+        return _CardState.model_validate(raw).approvals if raw is not None else []

@@ -51,7 +51,7 @@ Threat model & non-goals:
 
 The adapter forwards every Store public method (``write``, ``read``,
 ``read_entry``, ``read_all``, ``delete``, ``clear``, ``keys``,
-``items``, ``compare_and_swap``, ``compare_and_swap_many``, ``to_text``, ``__iter__``,
+``items``, ``compare_and_swap``, ``to_text``, ``__iter__``,
 ``__contains__``, ``__len__``, ``close``).  ``compare_and_swap`` is
 implemented at the adapter layer (NOT delegated raw) because the
 underlying Store would otherwise compare ciphertext tokens — and Fernet
@@ -65,7 +65,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping
+    from collections.abc import Iterator
 
     from cryptography.fernet import Fernet, MultiFernet
 
@@ -260,29 +260,27 @@ class EncryptedStoreAdapter:
         inner CAS attempt, in which case the inner CAS returns
         ``False`` and we propagate that.
         """
-        return self.compare_and_swap_many({key: expected}, {key: new}, agent_id=agent_id)
+        current_token = self._inner.read(key)
+        if current_token is None:
+            current_plain = None
+        else:
+            current_plain = self._decrypt(current_token)
 
-    def compare_and_swap_many(
-        self,
-        expected: Mapping[str, Any],
-        updates: Mapping[str, Any],
-        *,
-        delete: Iterable[str] = (),
-        agent_id: str | None = None,
-    ) -> bool:
-        """Compare plaintext, then atomically check and update the encrypted rows."""
+        # JSON-shape equality — reuse the base Store's own rule so a Pydantic
+        # model compares equal to the dict it round-trips to.  Without it the
+        # plaintext CAS would ``repr()`` the model and never match the
+        # persisted shape (the Codex P2 regression that first motivated a
+        # dedicated equality helper here).  Sharing ``_json_eq`` keeps this
+        # CAS path in lock-step with ``Store.compare_and_swap``.
         from lazybridge.store import _json_eq
 
-        tokens = {}
-        for key, value in expected.items():
-            token = self._inner.read(key)
-            if not _json_eq(self._decrypt(token) if token is not None else None, value):
-                return False
-            tokens[key] = token
-        return self._inner.compare_and_swap_many(
-            tokens,
-            {key: self._encrypt(value) for key, value in updates.items()},
-            delete=delete,
+        if not _json_eq(current_plain, expected):
+            return False
+
+        return self._inner.compare_and_swap(
+            key,
+            expected=current_token,
+            new=self._encrypt(new),
             agent_id=agent_id,
         )
 
