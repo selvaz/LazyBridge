@@ -41,15 +41,20 @@ def test_statistics_and_pairing():
 
 
 @pytest.mark.asyncio
-async def test_whole_mock_pipeline_and_resume(tmp_path, monkeypatch):
+async def test_mock_pipeline_and_resume(tmp_path, monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("mock must never construct a live engine")
 
     monkeypatch.setattr(harness, "live_engine", forbidden)
     path = tmp_path / "mock.jsonl"
-    args = harness.parse_args(["--mock", "--output", str(path)])
+    # The first four tasks exercise all four scripted outcomes. Include an API
+    # task as well. The reference-solution test grades the entire inventory.
+    tasks = [*TASKS[:4], next(task for task in TASKS if task.category == "api")]
+    task_ids = ",".join(task.id for task in tasks)
+    args = harness.parse_args(["--mock", "--tasks", task_ids, "--output", str(path)])
     rows = await harness.run(args)
-    assert len(rows) == 100
+    assert len(rows) == len(harness.ARMS) * len(tasks)
+    assert {(r["arm"], r["task_id"]) for r in rows} == {(arm, task.id) for arm in harness.ARMS for task in tasks}
     assert all(r["mock"] and isinstance(r["passed"], bool) for r in rows)
     assert all(r["attempts"] == 1 for r in rows if r["arm"] in "AB")
     assert any(r["attempts"] == 2 and r["passed"] for r in rows)
@@ -57,8 +62,8 @@ async def test_whole_mock_pipeline_and_resume(tmp_path, monkeypatch):
     assert harness.paired(rows, "A", "C", "coding")["fixed"]
     assert harness.paired(rows, "A", "C", "coding")["broken"]
     for arm in harness.ARMS:
-        assert sum(r["passed"] for r in rows if r["arm"] == arm and r["category"] == "coding") == 10
-        assert sum(r["passed"] for r in rows if r["arm"] == arm and r["category"] == "api") == 3
+        assert sum(r["passed"] for r in rows if r["arm"] == arm and r["category"] == "coding") == 2
+        assert sum(r["passed"] for r in rows if r["arm"] == arm and r["category"] == "api") == 1
     assert all(
         r["writer_calls"][0]["prompt"] == harness.writer_prompt(next(t for t in TASKS if t.id == r["task_id"]))
         for r in rows
