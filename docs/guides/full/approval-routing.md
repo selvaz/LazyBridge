@@ -173,6 +173,11 @@ or `researcher` template. `copy_card_template` draws from the parent's held,
 transferable cards, preserving any restrictions already applied. Templates
 start empty until the owner configures their contents.
 
+Call `prune_card_copies()` to remove expired or revoked copies, including
+copies invalidated through an ancestor. The queue retains originals, template
+selections, and approval receipts. Existing card registries migrate on first
+access. Upgrade all workers that share a registry before the first access.
+
 For a card check, include a `CardAction` on the typed request. The trusted
 execution layer supplies the actual argument vector, current directory, every
 affected path, network state, and branch or project identity when applicable.

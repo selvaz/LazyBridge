@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Barrier, Lock
 
 import pytest
 from pydantic import ValidationError
@@ -382,3 +385,227 @@ def test_sibling_copies_share_upstream_use_ceiling_under_concurrency(tmp_path: P
     assert sum(isinstance(result, CardApproval) for result in results) == 2
     assert len(queue.list_card_approvals()) == 2
     assert len(queue.list_pending_tickets()) == 8
+
+
+def test_approvals_on_disjoint_card_chains_each_use_one_cas(tmp_path: Path) -> None:
+    class RacingStore(Store):
+        def __init__(self):
+            super().__init__()
+            self.barrier = Barrier(2)
+            self.attempt_lock = Lock()
+            self.attempts = []
+            self.armed = False
+
+        def compare_and_swap_many(self, expected, updates, **kwargs):
+            if self.armed:
+                with self.attempt_lock:
+                    self.attempts.append(set(expected))
+                    first_attempt = len(self.attempts) <= 2
+                if first_attempt:
+                    self.barrier.wait(timeout=5)
+            return super().compare_and_swap_many(expected, updates, **kwargs)
+
+    store = RacingStore()
+    queue = ApprovalQueue(store, prefix="isolated", allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    originals = [
+        queue.issue_card(
+            credential=credential,
+            action_class="cleanup",
+            tier="routine",
+            matcher=CardMatcher(command=("rm",)),
+            transferable=True,
+        )
+        for _ in range(2)
+    ]
+    parent = resolve("edit-and-run", grant(tmp_path, *originals))
+    with policy_scope(parent, approval_actor="owner") as owner:
+        assert owner
+        copies = [queue.copy_card(original.card_id, holder=owner) for original in originals]
+
+    def submit(copy: ApprovalCard) -> CardApproval | ApprovalTicket:
+        with policy_scope(parent), policy_scope(grant(tmp_path, copy), approval_actor="worker") as worker:
+            assert worker
+            return queue.submit_typed_request(request(worker, cleanup()), requester=worker)
+
+    store.armed = True
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(submit, copies))
+    assert all(isinstance(result, CardApproval) for result in results)
+    first, second = store.attempts
+    assert first.isdisjoint(second)
+    prefix = "approval-cards:isolated:card:"
+    assert {frozenset(key for key in attempt if key.startswith(prefix)) for attempt in store.attempts} == {
+        frozenset(prefix + card_id for card_id in copy.chain) for copy in copies
+    }
+
+
+def test_legacy_card_document_migrates_lazily_and_only_once(tmp_path: Path) -> None:
+    clock = Clock()
+    with Store(db=str(tmp_path / "legacy.db")) as store:
+        queue = ApprovalQueue(store, prefix="legacy", clock=clock, allow_credential_issuance=True)
+        credential = queue.issue_approver_credential("owner", {"owner"})
+        original = ApprovalCard(
+            card_id="original",
+            action_class="cleanup",
+            tier="routine",
+            matcher=CardMatcher(command=("rm",)),
+            transferable=True,
+            max_uses=2,
+        )
+        old_copy = original.model_copy(update={"card_id": "old-copy", "provenance": original.chain})
+        revoked = old_copy.model_copy(update={"card_id": "revoked"})
+        receipt = CardApproval(
+            card_id=old_copy.card_id,
+            chain=old_copy.chain,
+            task_id="previous-job",
+            action="cleanup",
+            action_class="cleanup",
+            actor="previous-worker",
+            invocation_id="previous-invocation",
+            policy_digest="previous-policy",
+            request_digest="previous-request",
+            approved_at=clock.now,
+        )
+        key = "approval-cards:legacy"
+        store.write(
+            key,
+            {
+                "cards": {card.card_id: card.model_dump(mode="json") for card in (original, old_copy, revoked)},
+                "revoked": [revoked.card_id],
+                "used": {card_id: 1 for card_id in old_copy.chain},
+                "templates": {"coder": [original.card_id]},
+                "approvals": [receipt.model_dump(mode="json")],
+            },
+        )
+        assert store.items(prefix=f"{key}:card:") == []
+
+        assert queue.list_card_approvals() == [receipt]
+        assert store.read(f"{key}:card:old-copy")["used"] == 1
+        assert store.read(f"{key}:card:revoked")["revoked"] is True
+        assert store.read(f"{key}:template:coder") == [original.card_id]
+
+        with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+            assert owner
+            [copy] = queue.copy_card_template("coder", holder=owner)
+            with policy_scope(grant(tmp_path, copy), approval_actor="worker") as worker:
+                assert worker
+                approved = queue.submit_typed_request(request(worker, cleanup()), requester=worker)
+                assert isinstance(approved, CardApproval)
+                assert isinstance(
+                    queue.submit_typed_request(request(worker, cleanup(), attempt=2), requester=worker), ApprovalTicket
+                )
+
+        assert queue.prune_card_copies() == 1
+        queue.set_card_template("coder", (), credential=credential)
+        reopened = ApprovalQueue(store, prefix="legacy", clock=clock)
+        assert reopened.list_card_approvals() == [receipt, approved]
+        assert store.read(f"{key}:card:original")["used"] == 2
+        assert store.read(f"{key}:card:revoked") is None
+        assert store.read(f"{key}:template:coder") == []
+
+
+def test_prune_removes_only_retired_copies_and_keeps_receipts(tmp_path: Path) -> None:
+    clock = Clock()
+    store = Store()
+    queue = ApprovalQueue(store, prefix="pruning", clock=clock, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+    )
+    queue.set_card_template("coder", (original.card_id,), credential=credential)
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        expired = queue.copy_card(original.card_id, holder=owner, expires_at=clock.now + timedelta(hours=1))
+        revoked = queue.copy_card(original.card_id, holder=owner, transferable=True)
+        [live] = queue.copy_card_template("coder", holder=owner)
+        with policy_scope(grant(tmp_path, revoked), approval_actor="worker") as worker:
+            assert worker
+            leaf = queue.copy_card(revoked.card_id, holder=worker)
+            with policy_scope(grant(tmp_path, leaf), approval_actor="sub-worker") as child:
+                assert child
+                receipt = queue.submit_typed_request(request(child, cleanup()), requester=child)
+                assert isinstance(receipt, CardApproval)
+
+    assert queue.prune_card_copies() == 0
+    assert queue.revoke_card(revoked.card_id, credential=credential)
+    assert expired.expires_at is not None
+    clock.now = expired.expires_at
+    assert queue.prune_card_copies() == 3
+    assert queue.prune_card_copies() == 0
+    prefix = "approval-cards:pruning:card:"
+    assert {key for key, _ in store.items(prefix=prefix)} == {prefix + original.card_id, prefix + live.card_id}
+    assert store.read("approval-cards:pruning:template:coder") == [original.card_id]
+    assert queue.list_card_approvals() == [receipt]
+
+
+@pytest.mark.parametrize("change", ["template", "revocation"])
+def test_template_copy_rechecks_template_and_source_at_commit(tmp_path, monkeypatch, change) -> None:
+    store = Store()
+    queue = ApprovalQueue(store, prefix="template-race", allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+    )
+    queue.set_card_template("coder", (original.card_id,), credential=credential)
+    swap = store.compare_and_swap_many
+
+    def change_before_copy_commits(expected, updates, **kwargs):
+        monkeypatch.setattr(store, "compare_and_swap_many", swap)
+        if change == "template":
+            queue.set_card_template("coder", (), credential=credential)
+        else:
+            assert queue.revoke_card(original.card_id, credential=credential)
+        return swap(expected, updates, **kwargs)
+
+    monkeypatch.setattr(store, "compare_and_swap_many", change_before_copy_commits)
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        assert queue.copy_card_template("coder", holder=owner) == ()
+    prefix = "approval-cards:template-race:card:"
+    assert [key for key, _ in store.items(prefix=prefix)] == [prefix + original.card_id]
+
+
+def test_template_copy_rolls_back_the_entire_hand_on_a_write_failure(tmp_path: Path) -> None:
+    db = str(tmp_path / "templates.db")
+    with Store(db=db) as store, closing(sqlite3.connect(db)) as conn:
+        queue = ApprovalQueue(store, prefix="template-test", allow_credential_issuance=True)
+        credential = queue.issue_approver_credential("owner", {"owner"})
+        originals = [
+            queue.issue_card(
+                credential=credential,
+                action_class="cleanup",
+                tier="routine",
+                matcher=CardMatcher(command=("rm",)),
+                transferable=True,
+            )
+            for _ in range(2)
+        ]
+        ids = tuple(card.card_id for card in originals)
+        queue.set_card_template("coder", ids, credential=credential)
+        prefix = "approval-cards:template-test:card:"
+        before = store.items(prefix=prefix)
+        conn.execute(f"""
+            CREATE TRIGGER fail_second_copy BEFORE INSERT ON store
+            WHEN NEW.key GLOB '{prefix}*'
+              AND (SELECT count(*) FROM store WHERE key GLOB '{prefix}*') = 3
+            BEGIN
+                SELECT RAISE(ABORT, 'second copy failed');
+            END
+        """)
+        with policy_scope(resolve("edit-and-run", grant(tmp_path, *originals)), approval_actor="owner") as owner:
+            assert owner
+            with pytest.raises(sqlite3.IntegrityError, match="second copy failed"):
+                queue.copy_card_template("coder", holder=owner)
+            assert store.items(prefix=prefix) == before
+            assert store.read("approval-cards:template-test:template:coder") == list(ids)
+            conn.execute("DROP TRIGGER fail_second_copy")
+            assert {copy.chain[0] for copy in queue.copy_card_template("coder", holder=owner)} == set(ids)

@@ -1047,6 +1047,10 @@ class ApprovalQueue:
         """Read the durable record of actions approved by cards."""
         return self._cards.approvals()
 
+    def prune_card_copies(self) -> int:
+        """Remove copies invalidated by expiry or revocation and return the count."""
+        return self._cards.prune_copies()
+
     def list_card_proposals(self, *, parent: ApproverContext) -> list[CardProposal]:
         """Return card proposals after three identical requests to this parent."""
         if parent.invocation_id is None:
