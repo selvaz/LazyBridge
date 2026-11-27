@@ -9,6 +9,7 @@ import os
 import sqlite3
 import threading
 import time
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -423,55 +424,73 @@ class Store:
         :func:`_to_jsonable`), so Pydantic models / nested dicts compare
         the same as they do on disk and survive SQLite round-trips.
 
-        SQLite path: wraps the read-check-write in ``BEGIN IMMEDIATE``
-        so concurrent writers serialise on the SQLite reserved lock
-        instead of interleaving.  Exceptions are caught as
-        ``(sqlite3.Error, ValueError)`` — the ``ValueError`` arm covers
-        ``json.JSONDecodeError`` (a subclass) raised by ``json.loads``
-        on corrupt rows; without it, a corrupt row would leave the
-        ``BEGIN IMMEDIATE`` transaction open on the thread-local
-        connection and poison every subsequent call on that thread.
+        See :meth:`compare_and_swap_many` for the atomic write semantics.
+        """
+        return self.compare_and_swap_many({key: expected}, {key: new}, agent_id=agent_id)
+
+    def compare_and_swap_many(
+        self,
+        expected: Mapping[str, Any],
+        updates: Mapping[str, Any],
+        *,
+        delete: Iterable[str] = (),
+        agent_id: str | None = None,
+    ) -> bool:
+        """Apply all updates and deletions atomically if all expected values match.
+
+        Uses the same JSON equality as :meth:`compare_and_swap`. An expected
+        value of ``None`` matches a missing key. Keys can be checked without
+        changing them, and omitted expectations make the corresponding writes
+        unconditional within the batch. Deletions apply after updates.
         """
         if self._closed:
             raise RuntimeError("Store is closed")
+        deletions = tuple(delete)
         if not self._db:
             with self._lock:
-                entry = self._mem.get(key)
-                cur = entry.value if entry else None
-                if not _json_eq(cur, expected):
-                    return False
-                self._mem[key] = StoreEntry(key=key, value=_deep_copy_safe(new), agent_id=agent_id)
+                for key, value in expected.items():
+                    entry = self._mem.get(key)
+                    if not _json_eq(entry.value if entry else None, value):
+                        return False
+                self._mem.update(
+                    {
+                        key: StoreEntry(key=key, value=_deep_copy_safe(value), agent_id=agent_id)
+                        for key, value in updates.items()
+                    }
+                )
+                for key in deletions:
+                    self._mem.pop(key, None)
                 return True
 
         # SQLite path — serialise concurrent writers via reserved lock.
         conn = self._conn()
-        serialised_new = json.dumps(_to_jsonable(new), default=str)
+        serialised = [(key, json.dumps(_to_jsonable(value), default=str)) for key, value in updates.items()]
+        first_key = next(iter(expected or updates), "")
         started = time.monotonic()
         with self._lock:
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                row = conn.execute("SELECT value FROM store WHERE key=?", (key,)).fetchone()
-                cur = json.loads(row["value"]) if row else None
-                if not _json_eq(cur, expected):
-                    conn.execute("ROLLBACK")
-                    return False
-                conn.execute(
+                for key, value in expected.items():
+                    row = conn.execute("SELECT value FROM store WHERE key=?", (key,)).fetchone()
+                    if not _json_eq(json.loads(row["value"]) if row else None, value):
+                        conn.execute("ROLLBACK")
+                        return False
+                written_at = time.time()
+                conn.executemany(
                     "INSERT OR REPLACE INTO store (key, value, written_at, agent_id) VALUES (?,?,?,?)",
-                    (key, serialised_new, time.time(), agent_id),
+                    [(key, value, written_at, agent_id) for key, value in serialised],
                 )
+                conn.executemany("DELETE FROM store WHERE key=?", [(key,) for key in deletions])
                 conn.commit()
                 return True
-            except (sqlite3.Error, ValueError):
-                # Catch both sqlite3.Error (transaction/IO failures) and
-                # ValueError/JSONDecodeError (corrupt JSON in the row).
-                # Without the ValueError arm, a corrupt row causes
-                # json.loads to raise inside the BEGIN IMMEDIATE block,
-                # leaving the transaction open on the thread-local
-                # connection and poisoning every subsequent call on that thread.
-                self._recover_after_failed_write(conn, rollback_sql="ROLLBACK", caller="compare_and_swap")
+            except BaseException:
+                # Any failure after BEGIN must release the write lock and
+                # roll back changes already made by the batch.
+                if conn.in_transaction:
+                    self._recover_after_failed_write(conn, rollback_sql="ROLLBACK", caller="compare_and_swap")
                 raise
             finally:
-                _note_slow_write("compare_and_swap", key, started, self._db)
+                _note_slow_write("compare_and_swap", first_key, started, self._db)
 
     def to_text(self, keys: list[str] | None = None) -> str:
         data = self.read_all()
