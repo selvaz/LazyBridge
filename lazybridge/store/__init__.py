@@ -484,10 +484,9 @@ class Store:
                 conn.commit()
                 return True
             except BaseException:
-                # Any failure after BEGIN must release the write lock and
-                # roll back changes already made by the batch.
-                if conn.in_transaction:
-                    self._recover_after_failed_write(conn, rollback_sql="ROLLBACK", caller="compare_and_swap")
+                # Recover even if BEGIN failed. A broken connection can
+                # raise when asked whether it is in a transaction.
+                self._recover_after_failed_write(conn, rollback_sql="ROLLBACK", caller="compare_and_swap")
                 raise
             finally:
                 _note_slow_write("compare_and_swap", first_key, started, self._db)
