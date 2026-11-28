@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from pydantic import ValidationError
@@ -18,7 +21,7 @@ from lazybridge.ext.approval import (
     TypedApprovalRequest,
     route_ticket,
 )
-from lazybridge.ext.approval.cards import ARCHIVE_AFTER, _CardRegistry, _CardState
+from lazybridge.ext.approval.cards import ARCHIVE_AFTER, RESERVATION_TTL, _CardRegistry, _CardState
 from lazybridge.policy import (
     ApprovalCard,
     ApprovalTier,
@@ -335,6 +338,7 @@ def test_owner_templates_copy_held_cards_and_child_without_grant_inherits_no_car
         credential=credential, action_class="cleanup", tier="routine", matcher=matcher, transferable=True
     )
     queue.set_card_template("coder", (original.card_id,), credential=credential)
+    main = store.read(queue._cards._key)
     parent = resolve("edit-and-run", grant(tmp_path, original))
     empty = resolve("edit-and-run", grant(tmp_path))
     assert parent.digest != empty.digest
@@ -343,6 +347,10 @@ def test_owner_templates_copy_held_cards_and_child_without_grant_inherits_no_car
         [copy] = queue.copy_card_template("coder", holder=owner)
         assert copy.provenance == (original.card_id,)
         assert not copy.transferable
+        [(key, raw)] = store.items(prefix=f"{queue._cards._key}holder:{owner.invocation_id}-")
+        assert copy.card_id.startswith(f"{key.removeprefix(queue._cards._key)}:")
+        assert _CardState.model_validate(raw).cards == {copy.card_id: copy}
+        assert store.read(queue._cards._key) == main
         assert queue.copy_card_template("reviewer", holder=owner) == ()
         with policy_scope(None, approval_actor="worker") as child:
             assert child and child.effective_policy
@@ -368,6 +376,7 @@ def test_sibling_copies_share_upstream_use_ceiling_under_concurrency(tmp_path: P
     with policy_scope(owner_policy, approval_actor="owner") as owner:
         assert owner
         copies = [queue.copy_card(original.card_id, holder=owner) for _ in range(2)]
+    assert len(store.items(prefix=f"{queue._cards._key}holder:")) == 2
 
     def submit(i: int) -> CardApproval | ApprovalTicket:
         sibling = i % len(copies)
@@ -383,6 +392,299 @@ def test_sibling_copies_share_upstream_use_ceiling_under_concurrency(tmp_path: P
     assert sum(isinstance(result, CardApproval) for result in results) == 2
     assert len(queue.list_card_approvals()) == 2
     assert len(queue.list_pending_tickets()) == 8
+    assert len(_CardState.model_validate(store.read(queue._cards._key)).approvals) == 2
+
+
+def test_parallel_unlimited_card_uses_cas_only_their_holder_documents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = tmp_path / "approvals.db"
+    store = Store(db=str(db))
+    queue = ApprovalQueue(store, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+    )
+    queue.set_card_template("coder", (original.card_id,), credential=credential)
+    owner_policy = resolve("edit-and-run", grant(tmp_path, original))
+    with policy_scope(owner_policy, approval_actor="owner") as owner:
+        assert owner
+        (first,) = queue.copy_card_template("coder", holder=owner)
+        (second,) = queue.copy_card_template("coder", holder=owner)
+
+    def main_bytes() -> bytes:
+        with closing(sqlite3.connect(db)) as conn:
+            return conn.execute("SELECT CAST(value AS BLOB) FROM store WHERE key = ?", (queue._cards._key,)).fetchone()[
+                0
+            ]
+
+    main = main_bytes()
+    compare_and_swap = Store.compare_and_swap
+    holder_keys = {key for key, _ in store.items(prefix=f"{queue._cards._key}holder:")}
+    assert len(holder_keys) == 2
+    barrier = Barrier(2)
+    writes: list[str] = []
+
+    def overlap(anchored: Store, key: str, expected: object, new: object) -> bool:
+        assert key in holder_keys
+        writes.append(key)
+        barrier.wait(timeout=5)
+        assert compare_and_swap(anchored, key, expected, new)
+        return True
+
+    monkeypatch.setattr(Store, "compare_and_swap", overlap)
+
+    def submit(card: ApprovalCard) -> CardApproval | ApprovalTicket:
+        with policy_scope(resolve("edit-and-run", grant(tmp_path, card)), approval_actor="worker") as worker:
+            assert worker
+            return ApprovalQueue(store).submit_typed_request(request(worker, cleanup()), requester=worker)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        receipts = list(pool.map(submit, (first, second)))
+    assert all(isinstance(receipt, CardApproval) for receipt in receipts)
+    assert set(writes) == holder_keys and len(writes) == 4
+    assert main_bytes() == main
+    for _, raw in store.items(prefix=f"{queue._cards._key}holder:"):
+        assert _CardState.model_validate(raw).used == {}
+    assert set(receipts) == set(queue.list_card_approvals())
+
+
+@pytest.mark.parametrize(
+    ("revoked", "before_validation", "max_uses"),
+    [
+        ("owner", True, None),
+        ("owner", True, 1),
+        ("intermediate", True, None),
+        ("expiry", True, None),
+        ("owner", False, None),
+        ("copy", False, 1),
+    ],
+)
+def test_holder_approval_orders_revocation_at_post_commit_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    revoked: str,
+    before_validation: bool,
+    max_uses: int | None,
+) -> None:
+    clock = Clock()
+    store = Store()
+    queue = ApprovalQueue(store, clock=clock, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+        expires_at=clock.now + timedelta(hours=1) if revoked == "expiry" else None,
+    )
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        intermediate = queue.copy_card(original.card_id, holder=owner, transferable=True)
+        with policy_scope(grant(tmp_path, intermediate), approval_actor="parent") as parent:
+            assert parent
+            copy = queue.copy_card(intermediate.card_id, holder=parent, max_uses=max_uses)
+
+    holder_key = f"{queue._cards._key}{copy.card_id.rsplit(':', 1)[0]}"
+    revoked_card = {"owner": original, "intermediate": intermediate, "copy": copy}.get(revoked)
+    compare_and_swap = store.compare_and_swap
+    interleaved = False
+    discarded_attempts = 0
+
+    def interleave(key: str, expected: object, new: dict) -> bool:
+        nonlocal interleaved, discarded_attempts
+        if key == holder_key:
+            if not interleaved and bool(new["pending"]) == before_validation:
+                interleaved = True
+                if not before_validation:
+                    assert len(store.read(key)["pending"]) == 1
+                    assert queue.list_card_approvals() == []
+                if revoked_card is None:
+                    clock.now += timedelta(hours=1)
+                else:
+                    assert queue.revoke_card(revoked_card.card_id, credential=credential)
+            if before_validation and not new["pending"]:
+                discarded_attempts += 1
+                if discarded_attempts == 1:
+                    return False
+        return compare_and_swap(key, expected, new)
+
+    monkeypatch.setattr(store, "compare_and_swap", interleave)
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, copy)), approval_actor="worker") as worker:
+        assert worker
+        receipt = queue._cards.approve(
+            worker,
+            cleanup(),
+            (tmp_path / "scratch" / "item",),
+            action_name="cleanup",
+            action_class="cleanup",
+            tier="routine",
+            task_id="task",
+            request_digest="request",
+        )
+
+    assert interleaved
+    if before_validation:
+        assert receipt is None
+        assert discarded_attempts == 2
+        assert store.read(holder_key) is None
+        assert queue.list_card_approvals() == []
+        assert store.items(prefix=queue._cards._audit_prefix) == []
+        assert _CardState.model_validate(store.read(queue._cards._key)).used == {}
+    elif revoked == "copy":
+        # Revoking the copy retires its holder; confirmation cannot prove it still owns the
+        # reservation, so the use is refused rather than authorized.
+        assert receipt is None
+        assert store.read(holder_key) is None
+        assert queue.list_card_approvals() == []
+    else:
+        assert isinstance(receipt, CardApproval)
+        assert queue.list_card_approvals() == [receipt]
+
+
+def test_deletion_archives_a_holder_window_and_preserves_full_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("lazybridge.ext.approval.cards.ARCHIVE_AFTER", 2)
+    clock = Clock()
+    store = Store()
+    queue = ApprovalQueue(store, clock=clock, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    first, second = (
+        queue.issue_card(
+            credential=credential,
+            action_class="cleanup",
+            tier="routine",
+            matcher=CardMatcher(command=("rm",), arguments=(argument,)),
+            transferable=True,
+        )
+        for argument in ("scratch/item", "scratch/other")
+    )
+    queue.set_card_template("coder", (first.card_id, second.card_id), credential=credential)
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, first, second)), approval_actor="owner") as owner:
+        assert owner
+        original_receipt = queue.submit_typed_request(request(owner, cleanup()), requester=owner)
+        left, right = queue.copy_card_template("coder", holder=owner)
+
+    receipts = [original_receipt]
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, left, right)), approval_actor="worker") as worker:
+        assert worker
+        for attempt in range(1, 5):
+            clock.now += timedelta(seconds=1)
+            receipts.append(queue.submit_typed_request(request(worker, cleanup(), attempt=attempt), requester=worker))
+    assert all(isinstance(receipt, CardApproval) for receipt in receipts)
+    holder_prefix = f"{queue._cards._key}holder:"
+    [(holder_key, raw)] = store.items(prefix=holder_prefix)
+    window = _CardState.model_validate(raw).approvals
+    assert window == receipts[-2:]
+    assert len(store.items(prefix=queue._cards._audit_prefix)) == 2
+    # An archiver can have written a receipt before trimming it from the shard.
+    store.write(queue._cards._approval_key(window[0]), window[0].model_dump(mode="json"))
+    assert queue.list_card_approvals() == receipts
+
+    assert queue.revoke_card(left.card_id, credential=credential)
+    assert set(_CardState.model_validate(store.read(holder_key)).cards) == {right.card_id}
+    assert queue.revoke_card(right.card_id, credential=credential)
+    assert store.items(prefix=holder_prefix) == []
+    assert len(store.items(prefix=queue._cards._audit_prefix)) == 4
+    assert ApprovalQueue(store).list_card_approvals() == receipts
+
+
+def test_owner_expiry_blocks_copy_and_compacts_its_holder(tmp_path: Path) -> None:
+    clock = Clock()
+    store = Store()
+    queue = ApprovalQueue(store, clock=clock, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        expires_at=clock.now + timedelta(hours=1),
+        transferable=True,
+    )
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        copy = queue.copy_card(original.card_id, holder=owner)
+    clock.now += timedelta(hours=1)
+    main = store.read(queue._cards._key)
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, copy)), approval_actor="worker") as worker:
+        assert worker
+        assert isinstance(queue.submit_typed_request(request(worker, cleanup()), requester=worker), ApprovalTicket)
+    assert store.read(queue._cards._key) == main
+    assert store.items(prefix=f"{queue._cards._key}holder:") == []
+
+
+@pytest.mark.parametrize("transferable", [False, True])
+def test_copy_budget_covers_direct_and_delegated_uses(tmp_path: Path, transferable: bool) -> None:
+    store = Store()
+    queue = ApprovalQueue(store, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+    )
+    main = store.read(queue._cards._key)
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        copy = queue.copy_card(original.card_id, holder=owner, max_uses=2, transferable=transferable)
+        with policy_scope(grant(tmp_path, copy), approval_actor="worker") as worker:
+            assert worker
+            assert isinstance(queue.submit_typed_request(request(worker, cleanup()), requester=worker), CardApproval)
+            if transferable:
+                leaf = queue.copy_card(copy.card_id, holder=worker)
+                with policy_scope(grant(tmp_path, leaf), approval_actor="descendant") as descendant:
+                    assert descendant
+                    assert isinstance(
+                        queue.submit_typed_request(request(descendant, cleanup()), requester=descendant), CardApproval
+                    )
+            else:
+                assert isinstance(
+                    queue.submit_typed_request(request(worker, cleanup(), attempt=2), requester=worker), CardApproval
+                )
+                assert store.read(queue._cards._key) == main
+            assert isinstance(
+                queue.submit_typed_request(request(worker, cleanup(), attempt=3), requester=worker), ApprovalTicket
+            )
+    assert store.items(prefix=f"{queue._cards._key}holder:") == []
+    assert len(queue.list_card_approvals()) == 2
+
+
+def test_legacy_copy_still_uses_its_budget_from_the_main_document(tmp_path: Path) -> None:
+    store = Store()
+    queue = ApprovalQueue(store, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+    )
+    copy = original.model_copy(update={"card_id": "legacy:copy", "provenance": original.chain, "max_uses": 2})
+    state = _CardState(cards={original.card_id: original, copy.card_id: copy}, used={copy.card_id: 1})
+    store.write(queue._cards._key, state.model_dump(mode="json"))
+
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, copy)), approval_actor="worker") as worker:
+        assert worker
+        receipt = queue.submit_typed_request(request(worker, cleanup()), requester=worker)
+        assert isinstance(receipt, CardApproval)
+        assert isinstance(
+            queue.submit_typed_request(request(worker, cleanup(), attempt=2), requester=worker), ApprovalTicket
+        )
+    assert store.items(prefix=f"{queue._cards._key}holder:") == []
+    state = _CardState.model_validate(store.read(queue._cards._key))
+    assert state.cards == {original.card_id: original}
+    assert state.used == {}
+    assert state.approvals == [receipt] == queue.list_card_approvals()
 
 
 def test_compaction_preserves_audit_and_removes_unusable_cards(tmp_path: Path) -> None:
@@ -423,7 +725,9 @@ def test_compaction_preserves_audit_and_removes_unusable_cards(tmp_path: Path) -
     assert not state.live(child, clock.now)
     assert state.cards == {} and state.revoked == set() and state.used == {}
     assert state.templates["coder"] == ()
-    assert state.approvals == [receipt] == queue.list_card_approvals()
+    assert state.approvals == []
+    assert store.items(prefix=f"{queue._cards._key}holder:") == []
+    assert queue.list_card_approvals() == [receipt]
 
 
 def test_next_update_compacts_large_registry_in_one_cas() -> None:
@@ -568,3 +872,106 @@ def test_same_card_and_request_at_one_instant_keep_two_receipts() -> None:
     assert len(archived) == 2
     assert {CardApproval.model_validate(value).receipt_id for _, value in archived} == {"a" * 32, "b" * 32}
     assert sum(approval.receipt_id in {"a" * 32, "b" * 32} for approval in registry.approvals()) == 2
+
+
+def test_abandoned_holder_reservation_frees_its_use_after_the_ttl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    store = Store()
+    queue = ApprovalQueue(store, clock=clock, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+    )
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        copy = queue.copy_card(original.card_id, holder=owner, max_uses=1)
+
+    def approve() -> CardApproval | None:
+        with policy_scope(resolve("edit-and-run", grant(tmp_path, copy)), approval_actor="worker") as worker:
+            assert worker
+            return queue._cards.approve(
+                worker,
+                cleanup(),
+                (tmp_path / "scratch" / "item",),
+                action_name="cleanup",
+                action_class="cleanup",
+                tier="routine",
+                task_id="task",
+                request_digest="request",
+            )
+
+    def crash(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("process died before confirming")
+
+    finish = queue._cards._finish_holder_approval
+    monkeypatch.setattr(queue._cards, "_finish_holder_approval", crash)
+    with pytest.raises(RuntimeError):
+        approve()
+    monkeypatch.setattr(queue._cards, "_finish_holder_approval", finish)
+
+    assert approve() is None  # the abandoned reservation still holds the only use
+    clock.now += RESERVATION_TTL + timedelta(seconds=1)
+    receipt = approve()
+    assert isinstance(receipt, CardApproval)
+    assert queue.list_card_approvals() == [receipt]
+    assert approve() is None  # the confirmed use exhausts the card
+
+
+def test_confirmation_after_reservation_expiry_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = Clock()
+    store = Store()
+    queue = ApprovalQueue(store, clock=clock, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+    )
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        copy = queue.copy_card(original.card_id, holder=owner, max_uses=1)
+
+    contexts: list[object] = []
+
+    def use(worker: object) -> CardApproval | None:
+        return queue._cards.approve(
+            worker,  # type: ignore[arg-type]
+            cleanup(),
+            (tmp_path / "scratch" / "item",),
+            action_name="cleanup",
+            action_class="cleanup",
+            tier="routine",
+            task_id="task",
+            request_digest="request",
+        )
+
+    def approve() -> CardApproval | None:
+        with policy_scope(resolve("edit-and-run", grant(tmp_path, copy)), approval_actor="worker") as worker:
+            assert worker
+            contexts.append(worker)
+            return use(worker)
+
+    finish = queue._cards._finish_holder_approval
+    second: list[CardApproval | None] = []
+
+    def stall_then_finish(*args: object, **kwargs: object) -> bool:
+        # The first caller pauses past the TTL; a second caller takes the released use.
+        monkeypatch.setattr(queue._cards, "_finish_holder_approval", finish)
+        clock.now += RESERVATION_TTL + timedelta(seconds=1)
+        second.append(use(contexts[0]))
+        return finish(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(queue._cards, "_finish_holder_approval", stall_then_finish)
+    first = approve()
+
+    assert first is None
+    assert isinstance(second[0], CardApproval)
+    assert queue.list_card_approvals() == [second[0]]

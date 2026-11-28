@@ -165,13 +165,31 @@ limit, or remove transfer rights. For example, a parent can specialise a
 `("git", "commit")` card to branch `topic` and the absolute `src/` directory
 under the task folder, then give the copy a maximum of three uses and an expiry
 two hours from now. Include the returned copy in the child's task grant.
-Each use counts against the card and its ancestors. Revoking any card
+Each use counts against every use limit on the card and its ancestors. Revoking any card
 invalidates the downstream copies in its provenance chain.
 
 Use `set_card_template` to select original cards for the `coder`, `reviewer`,
 or `researcher` template. `copy_card_template` draws from the parent's held,
 transferable cards, preserving any restrictions already applied. Templates
 start empty until the owner configures their contents.
+
+Each copy operation stores its child hand under `approval-cards:<prefix>holder:<holder_key>`.
+The holder key combines the supplied `PolicyContext.invocation_id` with a unique
+hand ID so one invocation can provision several children independently. New copy
+IDs carry that key. Originals, templates, and previously stored copies continue
+to use the main document. Copy approvals check the current provenance chain
+and update only the holder document for unlimited chains or a limit on a
+non-transferable copy with unlimited ancestors. A bounded ancestor or
+transferable copy uses the main document to update all budgets atomically.
+An approval written to a holder document starts with a provisional receipt and
+reserves any local use. After that write, the registry rereads the provenance
+chain. A successful check confirms the receipt and charges the reserved use.
+A failed check removes the provisional receipt and releases the reservation.
+Only confirmed receipts appear in approval history. A revocation after a
+successful check leaves that approval in effect.
+Compaction discards provisional receipts for dead cards. When it removes a
+holder's last card, it archives the confirmed receipts for
+`list_card_approvals()` and deletes the holder document.
 
 For a card check, include a `CardAction` on the typed request. The trusted
 execution layer supplies the actual argument vector, current directory, every
