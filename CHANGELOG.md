@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-11-28
+
 ### Fixed
 - Recheck the provenance chain after reserving a holder card use so a concurrent ancestor revocation cancels the approval before it can authorize execution.
 - Expire holder card reservations after five minutes so a process that dies between reserving and confirming a use does not consume the card's budget for good.
