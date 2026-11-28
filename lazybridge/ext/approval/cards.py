@@ -390,34 +390,36 @@ class _CardRegistry:
                     for card_id in reversed(card.chain):
                         current.state(card_id)
                     approved = current.live(card, self._clock())
-                    self._finish_holder_approval(current, key, approval, approved=approved)
+                    approved = self._finish_holder_approval(current, key, approval, approved=approved)
                     return approval if approved else None
         return None
 
     def _finish_holder_approval(
         self, documents: _CardDocuments, key: str, approval: CardApproval, *, approved: bool
-    ) -> None:
+    ) -> bool:
+        """Confirm or release a reservation; True only if this caller still owned a live one."""
         while True:
             holder = documents.holder(key)
-            if not holder.cards:
-                if approved:
-                    # A later revocation can retire the holder after validation.
-                    self._archive(documents.store, [approval])
-                return
-
-            reserved = len(holder.pending)
+            now = self._clock()
+            owned = any(
+                receipt.receipt_id == approval.receipt_id and receipt.approved_at > now - RESERVATION_TTL
+                for receipt in holder.pending
+            )
+            if not holder.cards or not any(receipt.receipt_id == approval.receipt_id for receipt in holder.pending):
+                # The holder was retired or the reservation was dropped as abandoned: another
+                # caller may already have used the released capacity, so the use is refused.
+                return False
+            confirm = approved and owned
             holder.pending = [receipt for receipt in holder.pending if receipt.receipt_id != approval.receipt_id]
-            if approved:
+            if confirm:
                 card = holder.cards.get(approval.card_id)
                 if card is not None and card.max_uses is not None:
                     holder.used[card.card_id] = holder.used.get(card.card_id, 0) + 1
                 holder.approvals.append(approval)
-            elif len(holder.pending) == reserved:
-                return
 
-            self._compact(documents, key, self._clock())
+            self._compact(documents, key, now)
             if self._save(documents, key):
-                return
+                return confirm
             documents = _CardDocuments(documents.store, self._key)
 
     def approvals(self) -> list[CardApproval]:

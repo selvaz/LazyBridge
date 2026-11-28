@@ -536,12 +536,15 @@ def test_holder_approval_orders_revocation_at_post_commit_validation(
         assert queue.list_card_approvals() == []
         assert store.items(prefix=queue._cards._audit_prefix) == []
         assert _CardState.model_validate(store.read(queue._cards._key)).used == {}
+    elif revoked == "copy":
+        # Revoking the copy retires its holder; confirmation cannot prove it still owns the
+        # reservation, so the use is refused rather than authorized.
+        assert receipt is None
+        assert store.read(holder_key) is None
+        assert queue.list_card_approvals() == []
     else:
         assert isinstance(receipt, CardApproval)
         assert queue.list_card_approvals() == [receipt]
-        if revoked == "copy":
-            assert store.read(holder_key) is None
-            assert len(store.items(prefix=queue._cards._audit_prefix)) == 1
 
 
 def test_deletion_archives_a_holder_window_and_preserves_full_history(
@@ -918,3 +921,57 @@ def test_abandoned_holder_reservation_frees_its_use_after_the_ttl(
     assert isinstance(receipt, CardApproval)
     assert queue.list_card_approvals() == [receipt]
     assert approve() is None  # the confirmed use exhausts the card
+
+
+def test_confirmation_after_reservation_expiry_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = Clock()
+    store = Store()
+    queue = ApprovalQueue(store, clock=clock, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+    )
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        copy = queue.copy_card(original.card_id, holder=owner, max_uses=1)
+
+    contexts: list[object] = []
+
+    def use(worker: object) -> CardApproval | None:
+        return queue._cards.approve(
+            worker,  # type: ignore[arg-type]
+            cleanup(),
+            (tmp_path / "scratch" / "item",),
+            action_name="cleanup",
+            action_class="cleanup",
+            tier="routine",
+            task_id="task",
+            request_digest="request",
+        )
+
+    def approve() -> CardApproval | None:
+        with policy_scope(resolve("edit-and-run", grant(tmp_path, copy)), approval_actor="worker") as worker:
+            assert worker
+            contexts.append(worker)
+            return use(worker)
+
+    finish = queue._cards._finish_holder_approval
+    second: list[CardApproval | None] = []
+
+    def stall_then_finish(*args: object, **kwargs: object) -> bool:
+        # The first caller pauses past the TTL; a second caller takes the released use.
+        monkeypatch.setattr(queue._cards, "_finish_holder_approval", finish)
+        clock.now += RESERVATION_TTL + timedelta(seconds=1)
+        second.append(use(contexts[0]))
+        return finish(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(queue._cards, "_finish_holder_approval", stall_then_finish)
+    first = approve()
+
+    assert first is None
+    assert isinstance(second[0], CardApproval)
+    assert queue.list_card_approvals() == [second[0]]
