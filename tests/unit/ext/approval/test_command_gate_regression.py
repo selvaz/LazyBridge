@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from lazybridge.engines.coding import ApprovalRequest
-from lazybridge.ext.approval import Rule, TieredGate
+from lazybridge.ext.approval import Rule, TieredGate, split_command
 
 _SEVERITY = {"allow": 0, "session": 1, "ask": 2, "deny": 3, None: 3}
 _DEFAULT_RULES = (
@@ -49,3 +49,12 @@ def test_existing_command_tiers_are_not_weakened(command, rules):
     old_severity = max(_SEVERITY[rule.tier if rule else None] for rule in old_rules)
     result = gate._match(request)
     assert _SEVERITY[result.tier if result else None] >= old_severity
+
+
+def test_whole_command_fallback_can_weaken_an_existing_denial():
+    command = "git status; git push $(whoami)"
+    request = ApprovalRequest(provider="claude-code", kind="tool", name="Bash", arguments={"command": command})
+    gate = TieredGate(channel=None, rules=_DEFAULT_RULES)  # type: ignore[arg-type]
+    assert split_command(command) is None
+    assert gate._match(request).tier == "deny"
+    assert next(rule for rule in _DEFAULT_RULES if rule.matches(request)).tier == "allow"
