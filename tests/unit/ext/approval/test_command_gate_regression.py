@@ -32,7 +32,10 @@ _DEFAULT_RULES = (
         ("echo " + "a" * 2000, (Rule("ask", "Bash"),)),
         ("cd /repo && " + "x" * 6000 + " && rm -rf /tmp/gone", (Rule("ask", "Bash"),)),
         ("y" * 9000, (Rule("ask", "Bash"),)),
-        ("export API_KEY=sk-headsecret111 && " + "z" * 6000 + " && export API_KEY=sk-tailsecret222", (Rule("ask", "Bash"),)),
+        (
+            "export API_KEY=sk-headsecret111 && " + "z" * 6000 + " && export API_KEY=sk-tailsecret222",
+            (Rule("ask", "Bash"),),
+        ),
         ("git status", (Rule("ask", "Bash"),)),
     ],
 )
