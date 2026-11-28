@@ -1024,7 +1024,7 @@ class ApprovalQueue:
             transferable=transferable,
             provenance=source.chain,
         )
-        return self._cards.copy(source, child)
+        return self._cards.copy(source, child, holder)
 
     def revoke_card(self, card_id: str, *, credential: str) -> bool:
         """Revoke a card and, through its provenance, every downstream copy."""
@@ -1041,7 +1041,7 @@ class ApprovalQueue:
     def copy_card_template(self, name: CardTemplate, *, holder: PolicyContext) -> tuple[ApprovalCard, ...]:
         """Copy template cards from the parent's current hand for one child."""
         policy = holder.effective_policy
-        return self._cards.copy_template(name, policy.approval_cards) if policy else ()
+        return self._cards.copy_template(name, policy.approval_cards, holder) if policy else ()
 
     def list_card_approvals(self) -> list[CardApproval]:
         """Read the durable record of actions approved by cards."""
