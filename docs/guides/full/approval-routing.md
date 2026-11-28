@@ -165,13 +165,24 @@ limit, or remove transfer rights. For example, a parent can specialise a
 `("git", "commit")` card to branch `topic` and the absolute `src/` directory
 under the task folder, then give the copy a maximum of three uses and an expiry
 two hours from now. Include the returned copy in the child's task grant.
-Each use counts against the card and its ancestors. Revoking any card
+Each use counts against every use limit on the card and its ancestors. Revoking any card
 invalidates the downstream copies in its provenance chain.
 
 Use `set_card_template` to select original cards for the `coder`, `reviewer`,
 or `researcher` template. `copy_card_template` draws from the parent's held,
 transferable cards, preserving any restrictions already applied. Templates
 start empty until the owner configures their contents.
+
+Each copy operation stores its child hand under `approval-cards:<prefix>holder:<holder_key>`.
+The holder key combines the supplied `PolicyContext.invocation_id` with a unique
+hand ID so one invocation can provision several children independently. New copy
+IDs carry that key. Originals, templates, and previously stored copies continue
+to use the main document. Copy approvals check the current provenance chain
+and update only the holder document for unlimited chains or a limit on a
+non-transferable copy with unlimited ancestors. A bounded ancestor or
+transferable copy uses the main document to update all budgets atomically.
+Compaction removes a holder document once its last card is removed and archives
+its remaining receipts for `list_card_approvals()`.
 
 For a card check, include a `CardAction` on the typed request. The trusted
 execution layer supplies the actual argument vector, current directory, every

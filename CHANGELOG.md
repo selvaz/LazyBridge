@@ -8,6 +8,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Approval card copies are stored in per-holder documents. Uses with unlimited chains update only the holder's document, and shared use limits still use one atomic registry update. Approval history includes live and archived receipts across all documents.
+
 ## [1.11.0] - 2026-11-28
 
 ### Added
