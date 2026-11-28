@@ -499,9 +499,7 @@ def test_next_update_archives_large_audit_and_lists_full_ordered_history() -> No
     assert saved.approvals == receipts[-ARCHIVE_AFTER:]
     assert len(archived) == 451 - ARCHIVE_AFTER
     first_key, first_value = archived[0]
-    assert first_key == (
-        "approval-cards:queue:audit:2026-11-24T00:00:00+00:00-card-0-0000000000000000"
-    )
+    assert first_key == ("approval-cards:queue:audit:2026-11-24T00:00:00+00:00-card-0-0000000000000000")
     assert CardApproval.model_validate(first_value) == receipts[0]
     assert registry.approvals() == receipts
 

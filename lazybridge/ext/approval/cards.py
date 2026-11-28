@@ -97,8 +97,7 @@ class _CardRegistry:
 
     def _approval_key(self, approval: CardApproval) -> str:
         return (
-            f"{self._audit_prefix}{approval.approved_at.isoformat()}-"
-            f"{approval.card_id}-{approval.request_digest[:16]}"
+            f"{self._audit_prefix}{approval.approved_at.isoformat()}-{approval.card_id}-{approval.request_digest[:16]}"
         )
 
     def _update(self, change: Callable[[_CardState], _Result | None]) -> _Result | None:
@@ -238,10 +237,7 @@ class _CardRegistry:
         with self._anchored() as store:
             raw = store.read(self._key)
             archived = store.items(prefix=self._audit_prefix)
-        approvals = {
-            key: CardApproval.model_validate(value)
-            for key, value in archived
-        }
+        approvals = {key: CardApproval.model_validate(value) for key, value in archived}
         if raw is not None:
             state = _CardState.model_validate(raw)
             approvals.update((self._approval_key(approval), approval) for approval in state.approvals)
