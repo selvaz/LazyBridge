@@ -65,7 +65,32 @@ def test_quoted_separator_can_also_weaken_an_existing_denial():
     rules = (Rule("allow", "Bash", "echo*"), Rule("deny", "Bash", "git push*"))
     request = ApprovalRequest(provider="claude-code", kind="tool", name="Bash", arguments={"command": command})
     gate = TieredGate(channel=None, rules=rules)  # type: ignore[arg-type]
-    split = split_command(command)
-    assert split is not None and len(split.segments) == 1
+    assert split_command(command) is None
     assert gate._match(request).tier == "deny"
     assert next(rule for rule in rules if rule.matches(request)).tier == "allow"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git status; git push $(whoami)",
+        'echo "a; git push"',
+        'echo "a; b"',
+        "echo `whoami`",
+        "(git status)",
+        "cat <<EOF",
+        "echo 'unfinished",
+        "git status > output",
+        r"echo a\;b",
+    ],
+)
+async def test_unsupported_shapes_are_denied_even_by_allow_rule(command):
+    request = ApprovalRequest(provider="claude-code", kind="tool", name="Bash", arguments={"command": command})
+    gate = TieredGate(channel=None, rules=(Rule("allow", "Bash"),))  # type: ignore[arg-type]
+    decision = await gate(request)
+    assert decision.action == "deny"
+    assert decision.message == (
+        "command shape not supported by the approval gate: split it into simple commands without substitutions"
+    )
+    assert gate.log[-1].tier == "deny"
+    assert gate.log[-1].responder is None

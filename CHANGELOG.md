@@ -9,7 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Expose `split_command` for inspecting restricted compound shell commands in approval policies.
+- Expose `split_command` for inspecting restricted compound shell commands in approval policies. `TieredGate` now denies unsupported command shapes, including substitutions and quoted separators.
 
 ### Changed
 - Approval card registry updates remove revoked, expired, exhausted and orphaned cards while retaining the approval audit.
