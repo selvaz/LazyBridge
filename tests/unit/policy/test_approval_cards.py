@@ -446,11 +446,102 @@ def test_parallel_unlimited_card_uses_cas_only_their_holder_documents(
     with ThreadPoolExecutor(max_workers=2) as pool:
         receipts = list(pool.map(submit, (first, second)))
     assert all(isinstance(receipt, CardApproval) for receipt in receipts)
-    assert set(writes) == holder_keys and len(writes) == 2
+    assert set(writes) == holder_keys and len(writes) == 4
     assert main_bytes() == main
     for _, raw in store.items(prefix=f"{queue._cards._key}holder:"):
         assert _CardState.model_validate(raw).used == {}
     assert set(receipts) == set(queue.list_card_approvals())
+
+
+@pytest.mark.parametrize(
+    ("revoked", "before_validation", "max_uses"),
+    [
+        ("owner", True, None),
+        ("owner", True, 1),
+        ("intermediate", True, None),
+        ("expiry", True, None),
+        ("owner", False, None),
+        ("copy", False, 1),
+    ],
+)
+def test_holder_approval_orders_revocation_at_post_commit_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    revoked: str,
+    before_validation: bool,
+    max_uses: int | None,
+) -> None:
+    clock = Clock()
+    store = Store()
+    queue = ApprovalQueue(store, clock=clock, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+        expires_at=clock.now + timedelta(hours=1) if revoked == "expiry" else None,
+    )
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        intermediate = queue.copy_card(original.card_id, holder=owner, transferable=True)
+        with policy_scope(grant(tmp_path, intermediate), approval_actor="parent") as parent:
+            assert parent
+            copy = queue.copy_card(intermediate.card_id, holder=parent, max_uses=max_uses)
+
+    holder_key = f"{queue._cards._key}{copy.card_id.rsplit(':', 1)[0]}"
+    revoked_card = {"owner": original, "intermediate": intermediate, "copy": copy}.get(revoked)
+    compare_and_swap = store.compare_and_swap
+    interleaved = False
+    discarded_attempts = 0
+
+    def interleave(key: str, expected: object, new: dict) -> bool:
+        nonlocal interleaved, discarded_attempts
+        if key == holder_key:
+            if not interleaved and bool(new["pending"]) == before_validation:
+                interleaved = True
+                if not before_validation:
+                    assert len(store.read(key)["pending"]) == 1
+                    assert queue.list_card_approvals() == []
+                if revoked_card is None:
+                    clock.now += timedelta(hours=1)
+                else:
+                    assert queue.revoke_card(revoked_card.card_id, credential=credential)
+            if before_validation and not new["pending"]:
+                discarded_attempts += 1
+                if discarded_attempts == 1:
+                    return False
+        return compare_and_swap(key, expected, new)
+
+    monkeypatch.setattr(store, "compare_and_swap", interleave)
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, copy)), approval_actor="worker") as worker:
+        assert worker
+        receipt = queue._cards.approve(
+            worker,
+            cleanup(),
+            (tmp_path / "scratch" / "item",),
+            action_name="cleanup",
+            action_class="cleanup",
+            tier="routine",
+            task_id="task",
+            request_digest="request",
+        )
+
+    assert interleaved
+    if before_validation:
+        assert receipt is None
+        assert discarded_attempts == 2
+        assert store.read(holder_key) is None
+        assert queue.list_card_approvals() == []
+        assert store.items(prefix=queue._cards._audit_prefix) == []
+        assert _CardState.model_validate(store.read(queue._cards._key)).used == {}
+    else:
+        assert isinstance(receipt, CardApproval)
+        assert queue.list_card_approvals() == [receipt]
+        if revoked == "copy":
+            assert store.read(holder_key) is None
+            assert len(store.items(prefix=queue._cards._audit_prefix)) == 1
 
 
 def test_deletion_archives_a_holder_window_and_preserves_full_history(

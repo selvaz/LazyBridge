@@ -91,6 +91,18 @@ class _CardState(BaseModel):
             }
 
 
+class _HolderState(_CardState):
+    # Pending receipts reserve local uses during validation. Only confirmed
+    # receipts enter approvals or the archive.
+    pending: list[CardApproval] = Field(default_factory=list)
+
+    def at_capacity(self, card: ApprovalCard) -> bool:
+        if card.max_uses is None:
+            return False
+        reserved = sum(approval.card_id == card.card_id for approval in self.pending)
+        return self.used.get(card.card_id, 0) + reserved >= card.max_uses
+
+
 class _CardDocuments:
     """Read each provenance document once per CAS attempt."""
 
@@ -107,9 +119,15 @@ class _CardDocuments:
     def read(self, key: str) -> _CardState:
         if key not in self.states:
             raw = self.store.read(key)
+            model = _CardState if key == self.main_key else _HolderState
             self.raw[key] = raw
-            self.states[key] = _CardState.model_validate(raw) if raw is not None else _CardState()
+            self.states[key] = model.model_validate(raw) if raw is not None else model()
         return self.states[key]
+
+    def holder(self, key: str) -> _HolderState:
+        state = self.read(key)
+        assert isinstance(state, _HolderState)
+        return state
 
     def state(self, card_id: str) -> _CardState:
         return self.read(self.key(card_id))
@@ -165,7 +183,9 @@ class _CardRegistry:
                 if card_id not in documents.state(card_id).cards:
                     del state.used[card_id]
         else:
-            state.compact(now, live=documents.live)
+            holder = documents.holder(key)
+            holder.compact(now, live=documents.live)
+            holder.pending = [approval for approval in holder.pending if approval.card_id in holder.cards]
 
     def _compact_holder(self, documents: _CardDocuments, key: str, now: datetime) -> None:
         if key == self._key or documents.raw[key] is None:
@@ -208,7 +228,7 @@ class _CardRegistry:
         holder_key = f"{quote(holder.invocation_id, safe='')}-{uuid.uuid4().hex}"
         suffix = f"{_HOLDER_PREFIX}{holder_key}"
         cards = tuple(card.model_copy(update={"card_id": f"{suffix}:{card.card_id}"}) for card in cards)
-        state = _CardState(cards={card.card_id: card for card in cards})
+        state = _HolderState(cards={card.card_id: card for card in cards})
         store.write(f"{self._key}{suffix}", state.model_dump(mode="json"))
         return cards
 
@@ -324,9 +344,8 @@ class _CardRegistry:
                     # a single CAS, whether used directly or via a descendant.
                     shared_budget = bool(budget_ids) and (card.transferable or budget_ids[0] != card.card_id)
                     key = self._key if shared_budget else holder_key
-                    state = documents.read(key)
-                    for card_id in budget_ids:
-                        state.used[card_id] = state.used.get(card_id, 0) + 1
+                    if key != self._key and documents.holder(key).at_capacity(card):
+                        break
                     approval = CardApproval(
                         card_id=card.card_id,
                         chain=card.chain,
@@ -340,13 +359,56 @@ class _CardRegistry:
                         approved_at=now,
                         receipt_id=uuid.uuid4().hex,
                     )
-                    state.approvals.append(approval)
+                    if key == self._key:
+                        state = documents.read(key)
+                        for card_id in budget_ids:
+                            state.used[card_id] = state.used.get(card_id, 0) + 1
+                        state.approvals.append(approval)
+                    else:
+                        documents.holder(key).pending.append(approval)
                     self._compact(documents, key, now)
-                    if self._save(documents, key):
+                    if not self._save(documents, key):
+                        continue
+                    if key == self._key:
                         if key != holder_key:
                             self._compact_holder(documents, holder_key, now)
                         return approval
+
+                    # The holder CAS cannot detect revocations elsewhere in the
+                    # chain. Read every document afresh before confirming the use.
+                    current = _CardDocuments(store, self._key)
+                    for card_id in reversed(card.chain):
+                        current.state(card_id)
+                    approved = current.live(card, self._clock())
+                    self._finish_holder_approval(current, key, approval, approved=approved)
+                    return approval if approved else None
         return None
+
+    def _finish_holder_approval(
+        self, documents: _CardDocuments, key: str, approval: CardApproval, *, approved: bool
+    ) -> None:
+        while True:
+            holder = documents.holder(key)
+            if not holder.cards:
+                if approved:
+                    # A later revocation can retire the holder after validation.
+                    self._archive(documents.store, [approval])
+                return
+
+            reserved = len(holder.pending)
+            holder.pending = [receipt for receipt in holder.pending if receipt.receipt_id != approval.receipt_id]
+            if approved:
+                card = holder.cards.get(approval.card_id)
+                if card is not None and card.max_uses is not None:
+                    holder.used[card.card_id] = holder.used.get(card.card_id, 0) + 1
+                holder.approvals.append(approval)
+            elif len(holder.pending) == reserved:
+                return
+
+            self._compact(documents, key, self._clock())
+            if self._save(documents, key):
+                return
+            documents = _CardDocuments(documents.store, self._key)
 
     def approvals(self) -> list[CardApproval]:
         with self._anchored() as store:
