@@ -13,6 +13,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Approval card registry updates remove revoked, expired, exhausted and orphaned cards while retaining the approval audit.
+- Approval card registries retain only the newest 100 audit records in their live document and archive older records under individual keys, reducing CAS write contention without changing the history returned to callers.
 - `Store`: SQLite lock wait raised from 5 s to 30 s (`LAZYBRIDGE_STORE_BUSY_TIMEOUT`, seconds), also for the switch to WAL; a Store shared by several processes failed a job after minutes of work. Writes slower than `LAZYBRIDGE_STORE_SLOW_WRITE` (default 1 s) are logged on `lazybridge.store` with operation and key, to find long lock holders.
 
 ## [1.10.0] - 2026-11-25

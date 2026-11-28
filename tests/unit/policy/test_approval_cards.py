@@ -18,7 +18,7 @@ from lazybridge.ext.approval import (
     TypedApprovalRequest,
     route_ticket,
 )
-from lazybridge.ext.approval.cards import _CardRegistry, _CardState
+from lazybridge.ext.approval.cards import ARCHIVE_AFTER, _CardRegistry, _CardState
 from lazybridge.policy import (
     ApprovalCard,
     ApprovalTier,
@@ -465,6 +465,70 @@ def test_next_update_compacts_large_registry_in_one_cas() -> None:
     assert not compacted.live(descendant, clock.now)
 
 
+def _card_receipts(clock: Clock, count: int) -> list[CardApproval]:
+    return [
+        CardApproval(
+            card_id=f"card-{i}",
+            chain=(f"card-{i}",),
+            task_id=f"task-{i}",
+            action="cleanup",
+            action_class="cleanup",
+            actor="worker",
+            invocation_id="invocation",
+            policy_digest="policy",
+            request_digest=f"{i:064x}",
+            approved_at=clock.now + timedelta(seconds=i),
+        )
+        for i in range(count)
+    ]
+
+
+def test_next_update_archives_large_audit_and_lists_full_ordered_history() -> None:
+    from contextlib import nullcontext
+
+    clock = Clock()
+    store = Store()
+    registry = _CardRegistry(lambda: nullcontext(store), "approval-cards:queue:", clock)
+    receipts = _card_receipts(clock, 451)
+    store.write(registry._key, _CardState(approvals=receipts).model_dump(mode="json"))
+
+    assert registry._update(lambda _state: True)
+
+    saved = _CardState.model_validate(store.read(registry._key))
+    archived = store.items(prefix=registry._audit_prefix)
+    assert saved.approvals == receipts[-ARCHIVE_AFTER:]
+    assert len(archived) == 451 - ARCHIVE_AFTER
+    first_key, first_value = archived[0]
+    assert first_key == ("approval-cards:queue:audit:2026-11-24T00:00:00+00:00-card-0-0000000000000000")
+    assert CardApproval.model_validate(first_value) == receipts[0]
+    assert registry.approvals() == receipts
+
+
+def test_failed_cas_archive_retry_deduplicates_history() -> None:
+    from contextlib import nullcontext
+
+    clock = Clock()
+    store = Store()
+    registry = _CardRegistry(lambda: nullcontext(store), "approval-cards:queue:", clock)
+    receipts = _card_receipts(clock, ARCHIVE_AFTER + 1)
+    store.write(registry._key, _CardState(approvals=receipts).model_dump(mode="json"))
+    compare_and_swap = store.compare_and_swap
+    attempts = 0
+
+    def fail_once(key: str, expected: object, value: object) -> bool:
+        nonlocal attempts
+        attempts += 1
+        return False if attempts == 1 else compare_and_swap(key, expected, value)
+
+    store.compare_and_swap = fail_once  # type: ignore[method-assign]
+    assert registry._update(lambda _state: True)
+
+    assert attempts == 2
+    assert len(store.items(prefix=registry._audit_prefix)) == 1
+    assert len(_CardState.model_validate(store.read(registry._key)).approvals) == ARCHIVE_AFTER
+    assert registry.approvals() == receipts
+
+
 def test_compaction_retries_against_the_winning_cas_state() -> None:
     from contextlib import nullcontext
     from unittest.mock import MagicMock
@@ -485,3 +549,22 @@ def test_compaction_retries_against_the_winning_cas_state() -> None:
     assert expected == second
     assert set(saved["cards"]) == {"new", "concurrent"}
     assert saved["revoked"] == []
+
+
+def test_same_card_and_request_at_one_instant_keep_two_receipts() -> None:
+    from contextlib import nullcontext
+
+    clock = Clock()
+    store = Store()
+    registry = _CardRegistry(lambda: nullcontext(store), "approval-cards:queue:", clock)
+    base = _card_receipts(clock, 1)[0]
+    twins = [base.model_copy(update={"receipt_id": "a" * 32}), base.model_copy(update={"receipt_id": "b" * 32})]
+    filler = _card_receipts(clock, ARCHIVE_AFTER)
+    store.write(registry._key, _CardState(approvals=[*twins, *filler]).model_dump(mode="json"))
+
+    assert registry._update(lambda _state: True)
+
+    archived = store.items(prefix=registry._audit_prefix)
+    assert len(archived) == 2
+    assert {CardApproval.model_validate(value).receipt_id for _, value in archived} == {"a" * 32, "b" * 32}
+    assert sum(approval.receipt_id in {"a" * 32, "b" * 32} for approval in registry.approvals()) == 2
