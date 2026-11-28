@@ -31,6 +31,7 @@ primitive every agent needs. Nothing here is provider-specific — one
 from __future__ import annotations
 
 from lazybridge.ext.approval.cards import CardApproval, CardProposal, CardTemplate
+from lazybridge.ext.approval.command import CommandOperator, CommandSegment, CommandSplit, split_command
 from lazybridge.ext.approval.queue import (
     DEFAULT_DENIAL_PREFIX,
     DEFAULT_NOTIFY_FAILURE_PREFIX,
@@ -96,6 +97,9 @@ __all__ = [
     "CardProposal",
     "CardTemplate",
     "Channel",
+    "CommandOperator",
+    "CommandSegment",
+    "CommandSplit",
     "Rule",
     "ExecutorContext",
     "EscalationSummary",
@@ -114,6 +118,7 @@ __all__ = [
     "TieredGate",
     "run_gate_sync",
     "route_ticket",
+    "split_command",
     "ticket_gist",
     "redact_approval_payload",
 ]
