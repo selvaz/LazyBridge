@@ -12,14 +12,19 @@ _T = TypeVar("_T")
 
 
 class ToolClock:
-    """Exclude the union of in-flight application-tool intervals from time."""
+    """Exclude application tools from request time and additional waits from idle time.
 
-    def __init__(self) -> None:
+    ``idle_clock`` also pauses for application tools, but can be paused on its
+    own for waits that must still count against the overall request budget.
+    """
+
+    def __init__(self, *, _idle_only: bool = False) -> None:
         self._count = 0
         self._paused_at = 0.0
         self._paused_seconds = 0.0
         self.last_resume = 0.0
         self.changed = asyncio.Event()
+        self.idle_clock = self if _idle_only else ToolClock(_idle_only=True)
 
     @property
     def active(self) -> bool:
@@ -38,6 +43,8 @@ class ToolClock:
         self.changed = asyncio.Event()
 
     def enter(self) -> None:
+        if self.idle_clock is not self:
+            self.idle_clock.enter()
         if not self.active:
             self._paused_at = time.monotonic()
         self._count += 1
@@ -51,6 +58,8 @@ class ToolClock:
             self._paused_seconds += time.monotonic() - self._paused_at
             self.last_resume = self.now()
         self._notify()
+        if self.idle_clock is not self:
+            self.idle_clock.exit()
 
     @contextlib.contextmanager
     def tool(self) -> Iterator[None]:
@@ -77,6 +86,8 @@ async def wait_with_tool_clock(
     if clock is None or timeout is None:
         return await asyncio.wait_for(awaitable, timeout)
 
+    if idle:
+        clock = clock.idle_clock
     started = clock.now()
 
     async def deadline() -> None:

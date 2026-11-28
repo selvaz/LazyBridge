@@ -677,23 +677,24 @@ class AgentSdkClient(ClaudeSdkClient):
             # allow rules, so application tools and unmatched built-ins share
             # this one normalized approval path.
             if options.approval_gate is not None:
-                decision = await ask_approval(
-                    options.approval_gate,
-                    ApprovalRequest(
-                        provider="claude-code",
-                        kind="tool",
-                        name=name.removeprefix(native_tool_prefix),
-                        arguments=arguments,
-                        reason=getattr(context, "decision_reason", None),
-                        cwd=options.cwd,
-                        raw={
-                            "provider_tool_name": name,
-                            "tool_use_id": getattr(context, "tool_use_id", None),
-                            "title": getattr(context, "title", None),
-                            "description": getattr(context, "description", None),
-                        },
-                    ),
-                )
+                with options.tool_clock.idle_clock.tool() if options.tool_clock else contextlib.nullcontext():
+                    decision = await ask_approval(
+                        options.approval_gate,
+                        ApprovalRequest(
+                            provider="claude-code",
+                            kind="tool",
+                            name=name.removeprefix(native_tool_prefix),
+                            arguments=arguments,
+                            reason=getattr(context, "decision_reason", None),
+                            cwd=options.cwd,
+                            raw={
+                                "provider_tool_name": name,
+                                "tool_use_id": getattr(context, "tool_use_id", None),
+                                "title": getattr(context, "title", None),
+                                "description": getattr(context, "description", None),
+                            },
+                        ),
+                    )
                 if decision.action in {"allow", "allow_session"}:
                     updates = getattr(context, "suggestions", None) if decision.action == "allow_session" else None
                     return PermissionResultAllow(updated_permissions=updates or None)

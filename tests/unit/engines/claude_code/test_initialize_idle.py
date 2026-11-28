@@ -6,8 +6,11 @@ import json
 import pytest
 
 from lazybridge import Agent
+from lazybridge.engines._tool_clock import ToolClock, wait_with_tool_clock
 from lazybridge.engines.claude_code import ClaudeCodeEngine
-from lazybridge.engines.claude_code.sdk_client import AgentSdkClient
+from lazybridge.engines.claude_code.protocol import ClaudeSdkOptions
+from lazybridge.engines.claude_code.sdk_client import _INITIALIZED, AgentSdkClient, _bounded_query
+from lazybridge.engines.coding import ApprovalDecision
 
 pytest.importorskip("claude_agent_sdk")
 
@@ -95,3 +98,73 @@ async def test_initialize_and_idle_deadlines(stream, scenario):
             assert not result.ok
             assert expected in result.error.message
     assert transports[0].closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raises", [False, True])
+async def test_approval_waits_pause_sdk_idle_clock_and_resume_after_last_decision(raises):
+    clock = ToolClock()
+    entered = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
+    finished = [asyncio.Event(), asyncio.Event()]
+
+    async def gate(request):
+        index = request.arguments["index"]
+        entered[index].set()
+        await release[index].wait()
+        try:
+            if raises:
+                raise ValueError("approval failed")
+            return ApprovalDecision.allow()
+        finally:
+            finished[index].set()
+
+    sdk_options = AgentSdkClient._sdk_options(ClaudeSdkOptions(approval_gate=gate, tool_clock=clock))
+
+    async def query(prompt, options, transport, initialize_timeout):
+        yield _INITIALIZED
+        await asyncio.gather(
+            *(options.can_use_tool("Bash", {"index": index}, object()) for index in range(2)),
+            return_exceptions=True,
+        )
+        await asyncio.Event().wait()
+
+    async def consume():
+        return [item async for item in _bounded_query("test", sdk_options, 1, 0.05, clock, lambda **_: object(), query)]
+
+    task = asyncio.create_task(consume())
+    try:
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in entered)), 1)
+        await asyncio.sleep(0.12)
+        assert not task.done()
+        release[0].set()
+        await asyncio.wait_for(finished[0].wait(), 1)
+        await asyncio.sleep(0.12)
+        assert not task.done()
+        release[1].set()
+        await asyncio.wait_for(finished[1].wait(), 1)
+        await asyncio.sleep(0.02)
+        assert not task.done()
+        with pytest.raises(TimeoutError, match="stream went idle"):
+            await asyncio.wait_for(task, 1)
+        assert not clock.idle_clock.active
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_approval_wait_does_not_pause_request_budget():
+    clock = ToolClock()
+    entered = asyncio.Event()
+
+    async def gate(request):
+        entered.set()
+        await asyncio.Event().wait()
+
+    callback = AgentSdkClient._sdk_options(ClaudeSdkOptions(approval_gate=gate, tool_clock=clock)).can_use_tool
+    with pytest.raises(TimeoutError):
+        await wait_with_tool_clock(callback("Bash", {}, object()), 0.05, clock)
+    assert entered.is_set()
+    assert not clock.idle_clock.active
