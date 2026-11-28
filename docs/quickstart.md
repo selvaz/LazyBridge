@@ -6,7 +6,7 @@ independent review. Python 3.11 or later is required.
 ## Try it in two minutes
 
 ```sh
-python -m pip install "lazybridge[claude-code,deepseek]==1.11.0"
+python -m pip install "lazybridge[claude-code,deepseek]==1.11.1"
 python -m lazybridge.demo
 ```
 
@@ -41,7 +41,7 @@ read it to see the whole API it uses.
 ## Install and sign in
 
 ```sh
-python -m pip install "lazybridge[claude-code]==1.11.0"
+python -m pip install "lazybridge[claude-code]==1.11.1"
 ```
 
 Follow [Claude Code setup](guides/full/claude-code-engine.md#setup) and
@@ -123,7 +123,7 @@ Tier aliases are catalogue choices; they are distinct from LazyTools quota routi
 A provider-only installation can be explicit too:
 
 ```sh
-python -m pip install "lazybridge[anthropic]==1.11.0"
+python -m pip install "lazybridge[anthropic]==1.11.1"
 ```
 
 Set ANTHROPIC_API_KEY in the environment running Python for Anthropic API calls
