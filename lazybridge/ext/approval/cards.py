@@ -38,6 +38,8 @@ class CardApproval(BaseModel):
     policy_digest: str
     request_digest: str
     approved_at: datetime
+    # Unique per committed card use; None only on receipts written before archiving existed.
+    receipt_id: str | None = None
 
 
 class CardProposal(BaseModel):
@@ -96,9 +98,10 @@ class _CardRegistry:
         self._clock = clock
 
     def _approval_key(self, approval: CardApproval) -> str:
-        return (
-            f"{self._audit_prefix}{approval.approved_at.isoformat()}-{approval.card_id}-{approval.request_digest[:16]}"
-        )
+        # Two uses of one card for one request at the same instant are distinct receipts: the unique
+        # receipt id keeps them apart. Older receipts (no id) keep their timestamp-card-digest key.
+        identity = approval.receipt_id or f"{approval.card_id}-{approval.request_digest[:16]}"
+        return f"{self._audit_prefix}{approval.approved_at.isoformat()}-{identity}"
 
     def _update(self, change: Callable[[_CardState], _Result | None]) -> _Result | None:
         with self._anchored() as store:
@@ -226,6 +229,7 @@ class _CardRegistry:
                     policy_digest=policy.digest,
                     request_digest=request_digest,
                     approved_at=now,
+                    receipt_id=uuid.uuid4().hex,
                 )
                 state.approvals.append(approval)
                 return approval

@@ -549,3 +549,22 @@ def test_compaction_retries_against_the_winning_cas_state() -> None:
     assert expected == second
     assert set(saved["cards"]) == {"new", "concurrent"}
     assert saved["revoked"] == []
+
+
+def test_same_card_and_request_at_one_instant_keep_two_receipts() -> None:
+    from contextlib import nullcontext
+
+    clock = Clock()
+    store = Store()
+    registry = _CardRegistry(lambda: nullcontext(store), "approval-cards:queue:", clock)
+    base = _card_receipts(clock, 1)[0]
+    twins = [base.model_copy(update={"receipt_id": "a" * 32}), base.model_copy(update={"receipt_id": "b" * 32})]
+    filler = _card_receipts(clock, ARCHIVE_AFTER)
+    store.write(registry._key, _CardState(approvals=[*twins, *filler]).model_dump(mode="json"))
+
+    assert registry._update(lambda _state: True)
+
+    archived = store.items(prefix=registry._audit_prefix)
+    assert len(archived) == 2
+    assert {CardApproval.model_validate(value).receipt_id for _, value in archived} == {"a" * 32, "b" * 32}
+    assert sum(approval.receipt_id in {"a" * 32, "b" * 32} for approval in registry.approvals()) == 2
