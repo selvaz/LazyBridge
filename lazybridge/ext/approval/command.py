@@ -59,10 +59,10 @@ def split_command(command: str) -> CommandSplit | None:
         elif quote != "'" and (char == "`" or command.startswith("$(", i)):
             return None
         elif not quote:
-            if char in "()<&" or (char == "#" and (i == 0 or command[i - 1].isspace())):
-                # && is handled below as a separator.
-                if not command.startswith("&&", i):
-                    return None
+            if (char in "()<&" or (char == "#" and (i == 0 or command[i - 1].isspace()))) and not command.startswith(
+                "&&", i
+            ):
+                return None
             if char == ">":
                 end = i + 1
                 while end < len(command) and command[end] in " \t":
