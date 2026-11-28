@@ -29,8 +29,9 @@ separators and every segment is matched independently; the segment with the
 MOST SEVERE tier decides the whole call. **This is a name/pattern heuristic
 over command text, not a sandbox.** It closes the specific hole of
 ``git add x && git commit`` riding the blander tier of its first segment; it
-does not parse shell syntax, does not see quoting/subshells/`$( )`
-substitution, and cannot confine anything to a directory. Path confinement is
+does not fully parse shell syntax and cannot confine anything to a directory.
+Unsupported command shapes, including substitutions and quoted separators,
+are denied. Path confinement is
 a *separate* concern owned by the engine's own ``file_roots`` hook (matches
 Read/Glob/Grep/Edit/Write/NotebookEdit — see the ``extra_tools`` docstring on
 ``ClaudeCodePolicy`` in :mod:`lazybridge.engines.coding`): ``Bash`` in
@@ -76,6 +77,7 @@ from typing import Any, ClassVar, Literal, Protocol
 
 from lazybridge._display import CWD_BUDGET, elide
 from lazybridge.engines.coding import ApprovalDecision, ApprovalRequest
+from lazybridge.ext.approval.command import split_command
 
 Tier = Literal["allow", "session", "ask", "deny"]
 
@@ -189,6 +191,12 @@ class Rule:
             f"{self.tier}|{self.provider_pattern}|{self.kind_pattern}|{self.name_pattern}|{self.arg_pattern or ''}"
         )
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+# A command shape the splitter cannot cut safely (substitution, here-doc, quoted separator, file
+# redirection, ...) always goes to a human, one call at a time: no allow or session rule may approve
+# it from its whole text, and the shapes agents use daily (2>&1, here-doc commit messages) stay usable.
+_UNSUPPORTED_COMMAND = Rule("ask", "*")
 
 
 @dataclass(frozen=True)
@@ -340,12 +348,15 @@ class TieredGate:
         docstring for what it does and does not guard against.
         """
         command = request.arguments.get("command")
-        if not isinstance(command, str):
+        if not isinstance(command, str) or not command.strip():
+            # No shell command to split (a non-shell tool, or an empty field): match the request as is.
             return next((r for r in self.rules if r.matches(request)), None)
-        segments = [s.strip() for s in re.split(r"&&|\|\||[;|\n]", command) if s.strip()]
+        split = split_command(command)
+        if split is None:
+            return _UNSUPPORTED_COMMAND
         worst: Rule | None = None
-        for segment in segments or [command]:
-            probe = replace(request, arguments={**dict(request.arguments), "command": segment})
+        for segment in split.segments:
+            probe = replace(request, arguments={**dict(request.arguments), "command": segment.command})
             rule = next((r for r in self.rules if r.matches(probe)), None)
             if rule is None:
                 return None  # one unmatched segment sinks the whole call
