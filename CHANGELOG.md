@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-11-28
+
 ### Added
 - Expose `split_command` for inspecting restricted compound shell commands in approval policies. `TieredGate` now sends unsupported command shapes (substitutions, here-docs, quoted separators, file redirections) to a human on every call; no allow or session rule can approve them from their whole text.
 
