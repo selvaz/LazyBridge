@@ -181,8 +181,15 @@ to use the main document. Copy approvals check the current provenance chain
 and update only the holder document for unlimited chains or a limit on a
 non-transferable copy with unlimited ancestors. A bounded ancestor or
 transferable copy uses the main document to update all budgets atomically.
-Compaction removes a holder document once its last card is removed and archives
-its remaining receipts for `list_card_approvals()`.
+An approval written to a holder document starts with a provisional receipt and
+reserves any local use. After that write, the registry rereads the provenance
+chain. A successful check confirms the receipt and charges the reserved use.
+A failed check removes the provisional receipt and releases the reservation.
+Only confirmed receipts appear in approval history. A revocation after a
+successful check leaves that approval in effect.
+Compaction discards provisional receipts for dead cards. When it removes a
+holder's last card, it archives the confirmed receipts for
+`list_card_approvals()` and deletes the holder document.
 
 For a card check, include a `CardAction` on the typed request. The trusted
 execution layer supplies the actual argument vector, current directory, every

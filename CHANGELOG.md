@@ -8,6 +8,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Recheck the provenance chain after reserving a holder card use so a concurrent ancestor revocation cancels the approval before it can authorize execution.
+
 ### Changed
 - Approval card copies are stored in per-holder documents. Uses with unlimited chains update only the holder's document, and shared use limits still use one atomic registry update. Approval history includes live and archived receipts across all documents.
 
