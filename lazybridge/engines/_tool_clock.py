@@ -12,7 +12,11 @@ _T = TypeVar("_T")
 
 
 class ToolClock:
-    """Exclude the union of in-flight application-tool intervals from time."""
+    """Exclude application tools from request time and additional waits from idle time.
+
+    ``idle_clock`` also pauses for application tools, but can be paused on its
+    own for waits that must still count against the overall request budget.
+    """
 
     def __init__(self, *, _idle_only: bool = False) -> None:
         self._count = 0
