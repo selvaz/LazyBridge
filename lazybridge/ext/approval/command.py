@@ -27,8 +27,9 @@ def split_command(command: str) -> CommandSplit | None:
     """Split a restricted shell command, or return ``None`` if unsupported.
 
     Unquoted ``;``, ``&&``, ``||``, ``|`` and newlines join nonempty
-    segments. Quotes and backslash escapes are retained in the segment text;
-    separators inside quotes or escaped with a backslash are not split.
+    segments. Quotes and backslash escapes are retained in the segment text.
+    Separators inside quotes or escaped with a backslash are rejected, to
+    preserve the approval gate's conservative treatment of those shapes.
     Output redirections to exactly ``/dev/null`` (optionally with a numeric
     file descriptor and whitespace after ``>``) are retained. Other
     redirections, command substitution, backticks, unquoted parentheses,
@@ -48,8 +49,12 @@ def split_command(command: str) -> CommandSplit | None:
         if char == "\\" and quote != "'":
             if i + 1 == len(command):
                 return None
+            if command[i + 1] in ";|\n" or command.startswith("&&", i + 1):
+                return None
             i += 2
             continue
+        if quote and (char in ";|\n" or command.startswith("&&", i)):
+            return None
         if char == "'" and not quote:
             quote = "'"
         elif char == '"' and not quote:

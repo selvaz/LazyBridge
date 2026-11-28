@@ -18,14 +18,15 @@ def test_operators_and_redirection():
     )
 
 
-def test_quoted_and_escaped_separators():
-    assert split_command(r'''echo 'a; $(literal)' "b|c" x\;y; ls''') == CommandSplit(
-        (CommandSegment(r'''echo 'a; $(literal)' "b|c" x\;y''', ";"), CommandSegment("ls", None))
+def test_quotes_and_escapes_without_separators():
+    assert split_command(r'''echo '$(literal)' "hello world" x\ y; ls''') == CommandSplit(
+        (CommandSegment(r'''echo '$(literal)' "hello world" x\ y''', ";"), CommandSegment("ls", None))
     )
 
 
-def test_quoted_semicolon_is_one_segment():
-    assert split_command('echo "a; b"') == CommandSplit((CommandSegment('echo "a; b"', None),))
+@pytest.mark.parametrize("command", ['echo "a; b"', "echo 'a|b'", 'echo "a&&b"', r"echo a\;b", r"echo a\&&b"])
+def test_quoted_or_escaped_separators_are_rejected(command):
+    assert split_command(command) is None
 
 
 @pytest.mark.parametrize(
