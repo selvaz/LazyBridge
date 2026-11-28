@@ -58,3 +58,14 @@ def test_whole_command_fallback_can_weaken_an_existing_denial():
     assert split_command(command) is None
     assert gate._match(request).tier == "deny"
     assert next(rule for rule in _DEFAULT_RULES if rule.matches(request)).tier == "allow"
+
+
+def test_quoted_separator_can_also_weaken_an_existing_denial():
+    command = 'echo "a; git push"'
+    rules = (Rule("allow", "Bash", "echo*"), Rule("deny", "Bash", "git push*"))
+    request = ApprovalRequest(provider="claude-code", kind="tool", name="Bash", arguments={"command": command})
+    gate = TieredGate(channel=None, rules=rules)  # type: ignore[arg-type]
+    split = split_command(command)
+    assert split is not None and len(split.segments) == 1
+    assert gate._match(request).tier == "deny"
+    assert next(rule for rule in rules if rule.matches(request)).tier == "allow"
