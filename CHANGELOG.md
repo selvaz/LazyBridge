@@ -8,6 +8,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Expose `split_command` for inspecting restricted compound shell commands in approval policies. `TieredGate` now sends unsupported command shapes (substitutions, here-docs, quoted separators, file redirections) to a human on every call; no allow or session rule can approve them from their whole text.
+
 ### Fixed
 - Pause Claude Code's stream idle timer while tool approval decisions are pending.
 
