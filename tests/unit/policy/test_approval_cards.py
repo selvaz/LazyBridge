@@ -18,6 +18,7 @@ from lazybridge.ext.approval import (
     TypedApprovalRequest,
     route_ticket,
 )
+from lazybridge.ext.approval.cards import _CardRegistry, _CardState
 from lazybridge.policy import (
     ApprovalCard,
     ApprovalTier,
@@ -382,3 +383,105 @@ def test_sibling_copies_share_upstream_use_ceiling_under_concurrency(tmp_path: P
     assert sum(isinstance(result, CardApproval) for result in results) == 2
     assert len(queue.list_card_approvals()) == 2
     assert len(queue.list_pending_tickets()) == 8
+
+
+def test_compaction_preserves_audit_and_removes_unusable_cards(tmp_path: Path) -> None:
+    clock = Clock()
+    store = Store()
+    queue = ApprovalQueue(store, clock=clock, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+    )
+    queue.set_card_template("coder", (original.card_id,), credential=credential)
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        child = queue.copy_card(original.card_id, holder=owner, transferable=True)
+        with policy_scope(grant(tmp_path, child), approval_actor="worker") as worker:
+            assert worker
+            receipt = queue.submit_typed_request(request(worker, cleanup()), requester=worker)
+            assert isinstance(receipt, CardApproval)
+            assert queue.revoke_card(original.card_id, credential=credential)
+            assert not queue.revoke_card(original.card_id, credential=credential)
+            assert not queue.revoke_card(child.card_id, credential=credential)
+            with pytest.raises(PolicyWidening):
+                queue.copy_card(child.card_id, holder=worker)
+            assert isinstance(queue.submit_typed_request(request(worker, cleanup()), requester=worker), ApprovalTicket)
+        with pytest.raises(PolicyWidening):
+            queue.copy_card(original.card_id, holder=owner)
+        assert queue.copy_card_template("coder", holder=owner) == ()
+
+    with queue._anchored() as anchored:
+        raw = anchored.read(queue._cards._key)
+    state = _CardState.model_validate(raw)
+    assert set(raw) == {"cards", "revoked", "used", "approvals", "templates"}
+    assert not state.live(original, clock.now)
+    assert not state.live(child, clock.now)
+    assert state.cards == {} and state.revoked == set() and state.used == {}
+    assert state.templates["coder"] == ()
+    assert state.approvals == [receipt] == queue.list_card_approvals()
+
+
+def test_next_update_compacts_large_registry_in_one_cas() -> None:
+    from contextlib import nullcontext
+    from unittest.mock import MagicMock
+
+    clock = Clock()
+    live = ApprovalCard(card_id="live", action_class="cleanup", tier="routine", matcher=CardMatcher(command=("rm",)))
+    revoked = {f"revoked-{i}" for i in range(2000)}
+    expired = {f"expired-{i}" for i in range(2000)}
+    cards = {"live": live}
+    cards.update((key, live.model_copy(update={"card_id": key})) for key in revoked)
+    cards.update((key, live.model_copy(update={"card_id": key, "expires_at": clock.now})) for key in expired)
+    used_up = live.model_copy(update={"card_id": "used", "max_uses": 1})
+    orphan = live.model_copy(update={"card_id": "orphan", "provenance": ("missing",)})
+    descendant = live.model_copy(update={"card_id": "descendant", "provenance": ("orphan",)})
+    cards.update((card.card_id, card) for card in (used_up, orphan, descendant))
+    state = _CardState(
+        cards=cards,
+        revoked=revoked,
+        used={"used": 1, "live": 2},
+        templates={"coder": ("live", "used", next(iter(revoked)))},
+    )
+    raw = state.model_dump(mode="json")
+    store = MagicMock()
+    store.read.return_value = raw
+    store.compare_and_swap.return_value = True
+    registry = _CardRegistry(lambda: nullcontext(store), "cards", clock)
+    new = live.model_copy(update={"card_id": "new"})
+    assert registry.issue(new) == new
+    store.read.assert_called_once_with("cards")
+    store.compare_and_swap.assert_called_once()
+    key, expected, saved = store.compare_and_swap.call_args.args
+    assert key == "cards" and expected == raw
+    compacted = _CardState.model_validate(saved)
+    assert set(compacted.cards) == {"live", "new"}
+    assert compacted.revoked == set() and compacted.used == {"live": 2}
+    assert compacted.templates == {"coder": ("live",)}
+    assert not compacted.live(descendant, clock.now)
+
+
+def test_compaction_retries_against_the_winning_cas_state() -> None:
+    from contextlib import nullcontext
+    from unittest.mock import MagicMock
+
+    clock = Clock()
+    card = ApprovalCard(card_id="new", action_class="cleanup", tier="routine", matcher=CardMatcher(command=("rm",)))
+    dead = card.model_copy(update={"card_id": "dead"})
+    concurrent = card.model_copy(update={"card_id": "concurrent"})
+    first = _CardState(cards={"dead": dead}, revoked={"dead"}).model_dump(mode="json")
+    second = _CardState(cards={"dead": dead, "concurrent": concurrent}, revoked={"dead"}).model_dump(mode="json")
+    store = MagicMock()
+    store.read.side_effect = [first, second]
+    store.compare_and_swap.side_effect = [False, True]
+    registry = _CardRegistry(lambda: nullcontext(store), "cards", clock)
+    registry.issue(card)
+    assert store.compare_and_swap.call_count == 2
+    _, expected, saved = store.compare_and_swap.call_args.args
+    assert expected == second
+    assert set(saved["cards"]) == {"new", "concurrent"}
+    assert saved["revoked"] == []

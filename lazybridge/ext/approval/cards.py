@@ -71,6 +71,18 @@ class _CardState(BaseModel):
                 return False
         return True
 
+    def compact(self, now: datetime) -> None:
+        while dead := {card_id for card_id, card in self.cards.items() if not self.live(card, now)}:
+            for card_id in dead:
+                del self.cards[card_id]
+            self.revoked.difference_update(dead)
+            for card_id in dead:
+                self.used.pop(card_id, None)
+            self.templates = {
+                name: tuple(card_id for card_id in card_ids if card_id not in dead)
+                for name, card_ids in self.templates.items()
+            }
+
 
 class _CardRegistry:
     # One CAS binds usage against every ancestor's budget, revocation and the audit record.
@@ -87,7 +99,10 @@ class _CardRegistry:
                 raw = store.read(self._key)
                 state = _CardState.model_validate(raw) if raw is not None else _CardState()
                 result = change(state)
-                if result is None or store.compare_and_swap(self._key, raw, state.model_dump(mode="json")):
+                if result is None:
+                    return result
+                state.compact(self._clock())
+                if store.compare_and_swap(self._key, raw, state.model_dump(mode="json")):
                     return result
 
     def issue(self, card: ApprovalCard) -> ApprovalCard:
