@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 CardTemplate = Literal["coder", "reviewer", "researcher"]
 _Result = TypeVar("_Result")
+ARCHIVE_AFTER = 100
 
 
 class CardApproval(BaseModel):
@@ -37,6 +38,8 @@ class CardApproval(BaseModel):
     policy_digest: str
     request_digest: str
     approved_at: datetime
+    # Unique per committed card use; None only on receipts written before archiving existed.
+    receipt_id: str | None = None
 
 
 class CardProposal(BaseModel):
@@ -91,7 +94,14 @@ class _CardRegistry:
     ) -> None:
         self._anchored = anchored
         self._key = key
+        self._audit_prefix = f"{key}audit:"
         self._clock = clock
+
+    def _approval_key(self, approval: CardApproval) -> str:
+        # Two uses of one card for one request at the same instant are distinct receipts: the unique
+        # receipt id keeps them apart. Older receipts (no id) keep their timestamp-card-digest key.
+        identity = approval.receipt_id or f"{approval.card_id}-{approval.request_digest[:16]}"
+        return f"{self._audit_prefix}{approval.approved_at.isoformat()}-{identity}"
 
     def _update(self, change: Callable[[_CardState], _Result | None]) -> _Result | None:
         with self._anchored() as store:
@@ -102,6 +112,11 @@ class _CardRegistry:
                 if result is None:
                     return result
                 state.compact(self._clock())
+                if len(state.approvals) > ARCHIVE_AFTER:
+                    archived = state.approvals[:-ARCHIVE_AFTER]
+                    for approval in archived:
+                        store.write(self._approval_key(approval), approval.model_dump(mode="json"))
+                    del state.approvals[:-ARCHIVE_AFTER]
                 if store.compare_and_swap(self._key, raw, state.model_dump(mode="json")):
                     return result
 
@@ -214,6 +229,7 @@ class _CardRegistry:
                     policy_digest=policy.digest,
                     request_digest=request_digest,
                     approved_at=now,
+                    receipt_id=uuid.uuid4().hex,
                 )
                 state.approvals.append(approval)
                 return approval
@@ -224,4 +240,9 @@ class _CardRegistry:
     def approvals(self) -> list[CardApproval]:
         with self._anchored() as store:
             raw = store.read(self._key)
-        return _CardState.model_validate(raw).approvals if raw is not None else []
+            archived = store.items(prefix=self._audit_prefix)
+        approvals = {key: CardApproval.model_validate(value) for key, value in archived}
+        if raw is not None:
+            state = _CardState.model_validate(raw)
+            approvals.update((self._approval_key(approval), approval) for approval in state.approvals)
+        return sorted(approvals.values(), key=lambda approval: approval.approved_at)
