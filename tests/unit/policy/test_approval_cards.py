@@ -21,7 +21,7 @@ from lazybridge.ext.approval import (
     TypedApprovalRequest,
     route_ticket,
 )
-from lazybridge.ext.approval.cards import ARCHIVE_AFTER, _CardRegistry, _CardState
+from lazybridge.ext.approval.cards import ARCHIVE_AFTER, RESERVATION_TTL, _CardRegistry, _CardState
 from lazybridge.policy import (
     ApprovalCard,
     ApprovalTier,
@@ -869,3 +869,52 @@ def test_same_card_and_request_at_one_instant_keep_two_receipts() -> None:
     assert len(archived) == 2
     assert {CardApproval.model_validate(value).receipt_id for _, value in archived} == {"a" * 32, "b" * 32}
     assert sum(approval.receipt_id in {"a" * 32, "b" * 32} for approval in registry.approvals()) == 2
+
+
+def test_abandoned_holder_reservation_frees_its_use_after_the_ttl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = Clock()
+    store = Store()
+    queue = ApprovalQueue(store, clock=clock, allow_credential_issuance=True)
+    credential = queue.issue_approver_credential("owner", {"owner"})
+    original = queue.issue_card(
+        credential=credential,
+        action_class="cleanup",
+        tier="routine",
+        matcher=CardMatcher(command=("rm",)),
+        transferable=True,
+    )
+    with policy_scope(resolve("edit-and-run", grant(tmp_path, original)), approval_actor="owner") as owner:
+        assert owner
+        copy = queue.copy_card(original.card_id, holder=owner, max_uses=1)
+
+    def approve() -> CardApproval | None:
+        with policy_scope(resolve("edit-and-run", grant(tmp_path, copy)), approval_actor="worker") as worker:
+            assert worker
+            return queue._cards.approve(
+                worker,
+                cleanup(),
+                (tmp_path / "scratch" / "item",),
+                action_name="cleanup",
+                action_class="cleanup",
+                tier="routine",
+                task_id="task",
+                request_digest="request",
+            )
+
+    def crash(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("process died before confirming")
+
+    finish = queue._cards._finish_holder_approval
+    monkeypatch.setattr(queue._cards, "_finish_holder_approval", crash)
+    with pytest.raises(RuntimeError):
+        approve()
+    monkeypatch.setattr(queue._cards, "_finish_holder_approval", finish)
+
+    assert approve() is None  # the abandoned reservation still holds the only use
+    clock.now += RESERVATION_TTL + timedelta(seconds=1)
+    receipt = approve()
+    assert isinstance(receipt, CardApproval)
+    assert queue.list_card_approvals() == [receipt]
+    assert approve() is None  # the confirmed use exhausts the card

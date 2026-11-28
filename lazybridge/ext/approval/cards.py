@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeVar
 from urllib.parse import quote
@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 CardTemplate = Literal["coder", "reviewer", "researcher"]
 _Result = TypeVar("_Result")
 ARCHIVE_AFTER = 100
+# A reservation older than this was abandoned (the process died before confirming) and frees its use.
+RESERVATION_TTL = timedelta(minutes=5)
 _HOLDER_PREFIX = "holder:"
 
 
@@ -96,9 +98,17 @@ class _HolderState(_CardState):
     # receipts enter approvals or the archive.
     pending: list[CardApproval] = Field(default_factory=list)
 
-    def at_capacity(self, card: ApprovalCard) -> bool:
+    def drop_abandoned(self, now: datetime) -> None:
+        self.pending = [
+            approval
+            for approval in self.pending
+            if approval.card_id in self.cards and approval.approved_at > now - RESERVATION_TTL
+        ]
+
+    def at_capacity(self, card: ApprovalCard, now: datetime) -> bool:
         if card.max_uses is None:
             return False
+        self.drop_abandoned(now)
         reserved = sum(approval.card_id == card.card_id for approval in self.pending)
         return self.used.get(card.card_id, 0) + reserved >= card.max_uses
 
@@ -185,7 +195,7 @@ class _CardRegistry:
         else:
             holder = documents.holder(key)
             holder.compact(now, live=documents.live)
-            holder.pending = [approval for approval in holder.pending if approval.card_id in holder.cards]
+            holder.drop_abandoned(now)
 
     def _compact_holder(self, documents: _CardDocuments, key: str, now: datetime) -> None:
         if key == self._key or documents.raw[key] is None:
@@ -344,7 +354,7 @@ class _CardRegistry:
                     # a single CAS, whether used directly or via a descendant.
                     shared_budget = bool(budget_ids) and (card.transferable or budget_ids[0] != card.card_id)
                     key = self._key if shared_budget else holder_key
-                    if key != self._key and documents.holder(key).at_capacity(card):
+                    if key != self._key and documents.holder(key).at_capacity(card, now):
                         break
                     approval = CardApproval(
                         card_id=card.card_id,
