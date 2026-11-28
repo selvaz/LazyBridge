@@ -193,7 +193,10 @@ class Rule:
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-_UNSUPPORTED_COMMAND = Rule("deny", "*")
+# A command shape the splitter cannot cut safely (substitution, here-doc, quoted separator, file
+# redirection, ...) always goes to a human, one call at a time: no allow or session rule may approve
+# it from its whole text, and the shapes agents use daily (2>&1, here-doc commit messages) stay usable.
+_UNSUPPORTED_COMMAND = Rule("ask", "*")
 
 
 @dataclass(frozen=True)
@@ -345,7 +348,8 @@ class TieredGate:
         docstring for what it does and does not guard against.
         """
         command = request.arguments.get("command")
-        if not isinstance(command, str):
+        if not isinstance(command, str) or not command.strip():
+            # No shell command to split (a non-shell tool, or an empty field): match the request as is.
             return next((r for r in self.rules if r.matches(request)), None)
         split = split_command(command)
         if split is None:
@@ -378,14 +382,6 @@ class TieredGate:
         )
 
     async def _decide(self, request: ApprovalRequest, rule: Rule | None) -> tuple[ApprovalDecision, str | None]:
-        if rule is _UNSUPPORTED_COMMAND:
-            return (
-                ApprovalDecision.deny(
-                    "command shape not supported by the approval gate: "
-                    "split it into simple commands without substitutions"
-                ),
-                None,
-            )
         if rule is None:
             return (
                 ApprovalDecision.deny(

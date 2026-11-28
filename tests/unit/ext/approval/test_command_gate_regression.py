@@ -59,7 +59,7 @@ def test_whole_command_fallback_can_weaken_an_existing_denial():
     request = ApprovalRequest(provider="claude-code", kind="tool", name="Bash", arguments={"command": command})
     gate = TieredGate(channel=None, rules=_DEFAULT_RULES)  # type: ignore[arg-type]
     assert split_command(command) is None
-    assert gate._match(request).tier == "deny"
+    assert gate._match(request).tier == "ask"
     assert next(rule for rule in _DEFAULT_RULES if rule.matches(request)).tier == "allow"
 
 
@@ -69,7 +69,7 @@ def test_quoted_separator_can_also_weaken_an_existing_denial():
     request = ApprovalRequest(provider="claude-code", kind="tool", name="Bash", arguments={"command": command})
     gate = TieredGate(channel=None, rules=rules)  # type: ignore[arg-type]
     assert split_command(command) is None
-    assert gate._match(request).tier == "deny"
+    assert gate._match(request).tier == "ask"
     assert next(rule for rule in rules if rule.matches(request)).tier == "allow"
 
 
@@ -87,13 +87,15 @@ def test_quoted_separator_can_also_weaken_an_existing_denial():
         r"echo a\;b",
     ],
 )
-async def test_unsupported_shapes_are_denied_even_by_allow_rule(command):
+def test_unsupported_shapes_always_ask_even_with_an_allow_rule(command):
     request = ApprovalRequest(provider="claude-code", kind="tool", name="Bash", arguments={"command": command})
     gate = TieredGate(channel=None, rules=(Rule("allow", "Bash"),))  # type: ignore[arg-type]
-    decision = await gate(request)
-    assert decision.action == "deny"
-    assert decision.message == (
-        "command shape not supported by the approval gate: split it into simple commands without substitutions"
-    )
-    assert gate.log[-1].tier == "deny"
-    assert gate.log[-1].responder is None
+    rule = gate._match(request)
+    assert rule is not None and rule.tier == "ask"
+
+
+def test_empty_command_field_matches_the_request_as_is():
+    request = ApprovalRequest(provider="claude-code", kind="tool", name="Read", arguments={"command": ""})
+    gate = TieredGate(channel=None, rules=(Rule("allow", "Read"),))  # type: ignore[arg-type]
+    rule = gate._match(request)
+    assert rule is not None and rule.tier == "allow"
