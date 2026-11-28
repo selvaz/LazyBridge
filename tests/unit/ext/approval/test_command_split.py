@@ -24,6 +24,10 @@ def test_quoted_and_escaped_separators():
     )
 
 
+def test_quoted_semicolon_is_one_segment():
+    assert split_command('echo "a; b"') == CommandSplit((CommandSegment('echo "a; b"', None),))
+
+
 @pytest.mark.parametrize(
     "command",
     [
